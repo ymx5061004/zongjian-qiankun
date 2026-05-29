@@ -17,3 +17,7 @@ build/
 # 日志 / 临时文件
 *.log
 *.tmp
+
+# AI 助手本地文件（不入库）
+CLAUDE.md
+.claude/
