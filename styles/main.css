@@ -14,7 +14,7 @@
         }
 
         body { background-color: var(--bg-main); color: var(--text-main); font-family: "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 15px; display: flex; justify-content: center; }
-        #game-window { width: 1200px; background: var(--bg-panel); border: 2px solid #222; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border-radius: 8px; overflow: hidden; position: relative; }
+        #game-window { width: 100%; max-width: 1200px; box-sizing: border-box; background: var(--bg-panel); border: 2px solid #222; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border-radius: 8px; overflow: hidden; position: relative; }
         
         #create-role-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(10,10,10,0.98); z-index: 999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         .create-box { background: #1a1a1a; padding: 40px; border: 2px solid var(--color-gold); border-radius: 8px; text-align: center; box-shadow: 0 0 20px rgba(241,196,15,0.2); }
@@ -122,3 +122,107 @@
         .comp-up { color: #2ecc71; }
         .comp-down { color: #e74c3c; }
         .comp-equal { color: #888; }
+
+        /* ============================================================
+           响应式适配（移动端 / 平板）。桌面端 (>1024px) 布局完全不变。
+           断点：平板 ≤1024，手机 ≤768，小屏手机 ≤400。
+           ============================================================ */
+
+        /* —— 平板：略收紧间距、背包格减为 6 列 —— */
+        @media (max-width: 1024px) {
+            body { padding: 10px; }
+            .header-title { font-size: 22px; letter-spacing: 2px; }
+            .currency-bar { gap: 16px; }
+            .game-content { padding: 14px; min-height: 0; }
+            .grid-container { grid-template-columns: repeat(6, 1fr); }
+            .page { gap: 14px; }
+        }
+
+        /* —— 手机：单列布局、可滑动标签栏、堆叠顶栏、触摸友好尺寸 —— */
+        @media (max-width: 768px) {
+            body { padding: 0; }
+            #game-window { border-radius: 0; border-width: 0; box-shadow: none; }
+
+            /* 顶栏：标题与货币纵向堆叠，货币可换行。
+               min-height + 整条不折行，避免数值变长时顶栏高度跳变带动下方抖动 */
+            .game-header { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; min-height: 56px; box-sizing: border-box; }
+            .header-title { font-size: 19px; letter-spacing: 1px; }
+            .currency-bar { gap: 8px 16px; font-size: 12px; flex-wrap: wrap; }
+            .currency-bar span { white-space: nowrap; }
+
+            /* 标签栏：横向可滑动，避免 5 个标签挤成一团 */
+            .nav-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; box-sizing: border-box; }
+            .nav-tabs::-webkit-scrollbar { display: none; }
+            .tab-btn { flex: 0 0 auto; padding: 12px 16px; font-size: 14px; white-space: nowrap; }
+
+            .game-content { padding: 10px; min-height: 0; }
+
+            /* 所有分页改单列；抵消 index.html 内联的 grid-column: span 2。
+               作者样式表里的 !important 优先级高于普通内联样式，可正常覆盖。 */
+            .page.active { grid-template-columns: 1fr; gap: 12px; }
+            .page > .sub-panel { grid-column: auto !important; }
+
+            .sub-panel { padding: 14px; }
+            .panel-title { font-size: 15px; }
+
+            /* 背包格子：每行 5 个，触摸尺寸 */
+            .grid-container { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+            .item-slot { font-size: 10px; padding: 2px; }
+
+            /* 列表卡片：按钮换行铺满，便于点按 */
+            .list-card { flex-wrap: wrap; gap: 8px; padding: 12px 10px; }
+            .list-card > button { width: 100%; padding: 10px; }
+
+            .scroll-box { max-height: 52vh; }
+
+            /* 熔炼按钮区 */
+            .smelt-console { gap: 6px; padding: 10px; }
+            .btn-smelt { font-size: 11px; padding: 7px 9px; }
+            .btn { padding: 9px 14px; }
+
+            /* 战斗区：缩小画布与立绘，避免双方重叠或冲出屏幕 */
+            #battle-view-container { height: auto; gap: 10px; }
+            #battle-canvas-wrapper { height: 160px; }
+            .actor-sprite { width: 80px; height: 100px; bottom: 8px; }
+            .sprite-vector { width: 70px; height: 84px; }
+            .sprite-name-plate { width: 70px; font-size: 10px; }
+            #sprite-player { left: 16px; }
+            #sprite-enemy { right: 16px; }
+            .strike-dash-right { transform: translateX(40vw) scale(1.05) !important; }
+            .strike-dash-left { transform: translateX(-40vw) scale(1.05) !important; }
+            #battle-log { font-size: 11px; max-height: 32vh; }
+
+            /* 开场剧情 / 创角弹窗 */
+            #story-overlay { padding: 24px; }
+            #story-text { font-size: 16px; line-height: 1.9; letter-spacing: 1px; min-height: 0; }
+            #btn-enter-game { font-size: 16px !important; padding: 12px 32px !important; }
+            .create-box { padding: 26px 20px; width: 88%; box-sizing: border-box; }
+            .create-input { width: 100%; box-sizing: border-box; }
+        }
+
+        /* —— 小屏手机：进一步压缩 —— */
+        @media (max-width: 400px) {
+            .header-title { font-size: 17px; }
+            .currency-bar { font-size: 11px; gap: 8px 10px; }
+            .grid-container { grid-template-columns: repeat(4, 1fr); }
+            .tab-btn { padding: 11px 12px; font-size: 13px; }
+            #sprite-player { left: 8px; }
+            #sprite-enemy { right: 8px; }
+        }
+
+        /* 对比列宽度收归 class（桌面端保持原 140px），便于窄屏覆盖换行 */
+        .tooltip-column.diff-column { width: 140px; border-left: 1px dashed #333; padding-left: 15px; }
+
+        /* —— 触摸设备（无 hover）：浮动提示改为底部信息卡 ——
+           按 (hover: none) 触发，与 render.js 的 matchMedia('(hover: none)') 判定一致，
+           故平板/横屏(宽>768px)的触摸设备也能正确显示，不受像素断点影响。 */
+        @media (hover: none) {
+            #global-tooltip {
+                left: 0 !important; right: 0; top: auto !important; bottom: 0;
+                width: 100%; box-sizing: border-box; max-height: 70vh; overflow-y: auto;
+                border-radius: 12px 12px 0 0; border-left: 0; border-right: 0; border-bottom: 0;
+                pointer-events: auto; padding: 16px 16px 22px;
+            }
+            #global-tooltip .tooltip-container { flex-wrap: wrap; gap: 14px; }
+            #global-tooltip .tooltip-column { width: auto !important; flex: 1 1 130px; min-width: 118px; padding-left: 0 !important; border-left: 0 !important; }
+        }

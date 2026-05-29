@@ -42,8 +42,11 @@ function spawnPopupEffect(isToPlayer, text, isCrit = false, isHeal = false) {
     if (isHeal) { popup.style.color = "var(--color-success)"; }
     else if (isCrit) { popup.style.color = "var(--color-orange)"; popup.style.fontSize = "24px"; }
     else { popup.style.color = isToPlayer ? "var(--color-accent)" : "#ffffff"; }
-    popup.style.bottom = "90px";
-    if (isToPlayer) popup.style.left = "90px"; else popup.style.right = "90px";
+    // 手机端画布更矮更窄(160px)：起点下移、靠近各自立绘，避免数字冲出画布顶部或在中央叠显
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    popup.style.bottom = isMobile ? "55px" : "90px";
+    const side = isMobile ? "28px" : "90px";
+    if (isToPlayer) popup.style.left = side; else popup.style.right = side;
     wrapper.appendChild(popup);
     setTimeout(() => { popup.remove(); }, 600);
 }

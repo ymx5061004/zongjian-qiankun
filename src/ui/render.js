@@ -58,7 +58,7 @@ function generateHtmlColumn(info, titlePrefix = "", isCurrentlyEquipped = false)
 }
 
 function generateDiffColumn(curItem, eqItem) {
-    let html = `<div class="tooltip-column" style="border-left: 1px dashed #333; padding-left: 15px; width: 140px;">`;
+    let html = `<div class="tooltip-column diff-column">`;
     html += `<div class="tooltip-title" style="color:#aaa;">🔀 变更对比</div>`;
     const fields = [{ k: 'atk', n: '攻击' }, { k: 'def', n: '防御' }, { k: 'hp', n: '气血' }, { k: 'crit', n: '暴击' }, { k: 'dodge', n: '闪避' }];
     fields.forEach(f => {
@@ -73,31 +73,52 @@ function generateDiffColumn(curItem, eqItem) {
     return html;
 }
 
+function buildTooltipHtml(target) {
+    const info = JSON.parse(target.getAttribute('data-tip'));
+    const isEquippedSlot = target.id && target.id.startsWith("slot-container-");
+    const isForgeSlot = target.id && target.id.startsWith("forge-slot-");
+    let finalHtml = `<div class="tooltip-container">`;
+
+    if (isEquippedSlot || isForgeSlot) {
+        finalHtml += generateHtmlColumn(info, "", isEquippedSlot);
+    } else if (info.type === "book") {
+        finalHtml += generateHtmlColumn(info);
+    } else {
+        const matchedEquip = state.player.equips[info.type];
+        finalHtml += generateHtmlColumn(info, "👉 ", false);
+        finalHtml += generateHtmlColumn(matchedEquip, "临·", true);
+        finalHtml += generateDiffColumn(info, matchedEquip);
+    }
+    finalHtml += `</div>`;
+    return finalHtml;
+}
+
+function showTooltip(target, tipNode) {
+    try {
+        tipNode.innerHTML = buildTooltipHtml(target);
+        tipNode.style.display = 'block';
+    } catch (err) { hideTooltip(); /* data-tip 解析失败：隐藏，避免残留旧内容 */ }
+}
+
 export function initTooltipEvent() {
     const tipNode = document.getElementById('global-tooltip');
+
+    // 触摸设备无 hover：改为点按 [data-tip] 弹出底部信息卡（CSS 媒体查询负责样式）。
+    // 带 data-act 的格子（背包/洪炉）交给原有点击委托，避免与操作弹窗冲突。
+    if (window.matchMedia('(hover: none)').matches) {
+        document.body.addEventListener('click', function (e) {
+            if (e.target.closest('#global-tooltip')) { hideTooltip(); return; }
+            const tipEl = e.target.closest('[data-tip]');
+            const actEl = e.target.closest('[data-act]');
+            if (tipEl && !actEl) { showTooltip(tipEl, tipNode); return; }
+            hideTooltip();
+        });
+        return;
+    }
+
     document.body.addEventListener('mouseover', function (e) {
         const target = e.target.closest('[data-tip]');
-        if (!target) return;
-        try {
-            const info = JSON.parse(target.getAttribute('data-tip'));
-            const isEquippedSlot = target.id && target.id.startsWith("slot-container-");
-            const isForgeSlot = target.id && target.id.startsWith("forge-slot-");
-            let finalHtml = `<div class="tooltip-container">`;
-
-            if (isEquippedSlot || isForgeSlot) {
-                finalHtml += generateHtmlColumn(info, "", isEquippedSlot);
-            } else if (info.type === "book") {
-                finalHtml += generateHtmlColumn(info);
-            } else {
-                const matchedEquip = state.player.equips[info.type];
-                finalHtml += generateHtmlColumn(info, "👉 ", false);
-                finalHtml += generateHtmlColumn(matchedEquip, "临·", true);
-                finalHtml += generateDiffColumn(info, matchedEquip);
-            }
-            finalHtml += `</div>`;
-            tipNode.innerHTML = finalHtml;
-            tipNode.style.display = 'block';
-        } catch (err) { }
+        if (target) showTooltip(target, tipNode);
     });
     document.body.addEventListener('mousemove', function (e) {
         if (tipNode.style.display === 'block') {

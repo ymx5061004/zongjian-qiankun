@@ -148,7 +148,38 @@ export async function useBagItem(idx) {
     const item = player.bag[idx];
     if (!item) return;
 
-    const action = await chooseAction(`【${item.name}】`, "请选择操作：", [
+    // 弹窗内附带属性 + 变更对比：移动端点背包格子直接进此弹窗（没有 hover 提示），
+    // 需在此看清自身属性，并补回桌面端 hover 才有的"与当前装备的 ▲▼ 对比"。
+    let message;
+    if (item.type === 'book') {
+        const desc = (item.payload && item.payload.desc) ? item.payload.desc : '江湖武学秘籍';
+        message = `<div style="color:#bbb;font-size:13px;line-height:1.6;margin-bottom:10px;">${desc}</div>请选择操作：`;
+    } else {
+        const fields = [
+            { k: 'atk', n: '攻击' }, { k: 'def', n: '防御' }, { k: 'hp', n: '气血' },
+            { k: 'crit', n: '暴击', s: '%' }, { k: 'dodge', n: '闪避', s: '%' }
+        ];
+        const eq = player.equips[item.type];
+        const statParts = [];
+        const diffParts = [];
+        fields.forEach(f => {
+            const cur = item[f.k] || 0;
+            if (cur) statParts.push(`${f.n} +${cur}${f.s || ''}`);
+            const diff = cur - (eq ? (eq[f.k] || 0) : 0);
+            if (diff > 0) diffParts.push(`<span style="color:var(--color-success)">${f.n} ▲+${diff}${f.s || ''}</span>`);
+            else if (diff < 0) diffParts.push(`<span style="color:var(--color-accent)">${f.n} ▼${diff}${f.s || ''}</span>`);
+        });
+        const statLine = statParts.length ? statParts.join('　') : '无属性加成';
+        const cmpLabel = eq ? `🔀 对比当前【${eq.name}】` : '🔀 该部位当前空缺，装备后净增';
+        const cmpLine = diffParts.length ? diffParts.join('　') : '与当前装备属性相同';
+        message =
+            `<div style="color:#bbb;font-size:13px;line-height:1.6;margin-bottom:8px;">${statLine}</div>` +
+            `<div style="font-size:12px;color:#888;margin-bottom:3px;">${cmpLabel}</div>` +
+            `<div style="font-size:13px;line-height:1.7;margin-bottom:10px;">${cmpLine}</div>` +
+            `请选择操作：`;
+    }
+
+    const action = await chooseAction(`【${item.name}】`, message, [
         { label: item.type === 'book' ? '参悟绝学' : '披挂上身', value: '1', cls: 'btn-success' },
         { label: '投入天地洪炉', value: '2' },
         { label: `熔炼换取 ${item.price} 碎银`, value: '3', cls: 'btn-danger' }
