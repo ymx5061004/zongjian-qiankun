@@ -3,9 +3,9 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, SKILL_SECTS, SKILL_SUFFIXES, MAP_NAMES, BALANCE } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateItemByMatrix } from '../domain.js';
+import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix } from '../domain.js';
 import { formatNumber } from '../util.js';
 
 // ---------- 浮动提示 tooltip ----------
@@ -231,8 +231,10 @@ export function renderShopGoods() {
             const idx = shopGoods.push({ kind: 'item', obj: mockItem }) - 1;
             card.innerHTML = `<span data-tip='${JSON.stringify(mockItem)}' style="cursor:help;"><b class="q-${mockItem.quality}">[装备] ${mockItem.name} 🔍</b></span><button class="btn btn-success" data-act="buy-item" data-idx="${idx}">购买 (${mockItem.price}文)</button>`;
         } else {
-            const suff = SKILL_SUFFIXES[Math.floor(Math.random() * SKILL_SUFFIXES.length)];
-            const mockSkill = { id: "sk_" + Math.floor(Math.random() * 10000), name: SKILL_SECTS[Math.floor(Math.random() * SKILL_SECTS.length)] + suff.name, type: suff.type, level: 1, hp: suff.hp || 0, atk: suff.atk || 0, def: suff.def || 0, dodge: suff.dodge || 0, crit: suff.crit || 0, desc: suff.desc, price: 6000 };
+            // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/dropRate/coinRate），
+            // 仅覆盖售价为固定 6000。原先此处手搓的对象漏了 power，主动技触发时伤害会算成 NaN。
+            const mockSkill = generateSkillByMatrix(player.realmLevel);
+            mockSkill.price = 6000;
             const bookItem = { name: `秘籍·《${mockSkill.name}》`, type: "book", payload: mockSkill, price: mockSkill.price };
             const idx = shopGoods.push({ kind: 'skill', obj: mockSkill }) - 1;
             card.innerHTML = `<span data-tip='${JSON.stringify(bookItem)}' style="cursor:help;"><strong style="color:var(--color-gold);">📜 绝学《${mockSkill.name}》 🔍</strong></span><button class="btn btn-success" data-act="buy-skill" data-idx="${idx}">购买 (${mockSkill.price}文)</button>`;

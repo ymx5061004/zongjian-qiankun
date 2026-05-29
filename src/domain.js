@@ -147,7 +147,11 @@ export function simulateBattle(stats, enemy, skills) {
         const active = activePool.length > 0 && Math.random() < B.activeSkillChance
             ? activePool[Math.floor(Math.random() * activePool.length)]
             : null;
-        if (active) dmg = Math.floor(dmg * (active.power + active.level * B.activeLevelScale));
+        // 兜底：power 缺失/非有限数时按 1 倍处理，绝不让伤害退化成 NaN（旧档里可能存在缺 power 的主动技）
+        if (active) {
+            const power = Number.isFinite(active.power) ? active.power : 1;
+            dmg = Math.floor(dmg * (power + active.level * B.activeLevelScale));
+        }
         if (isCrit) dmg = Math.floor(dmg * B.critMult);
 
         const dmgToE = Math.max(1, dmg - enemy.def);
