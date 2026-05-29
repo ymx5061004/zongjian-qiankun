@@ -43,7 +43,7 @@ python -m http.server 8080
 npx serve .
 ```
 
-## 部署到服务器（如 yetaotao.cn）
+## 部署到服务器
 
 纯静态，**把整个文件夹原样上传**到站点目录即可，无需构建、无需 node 运行时。唯一要求：服务器以正确的 JS MIME 类型（`text/javascript` 或 `application/javascript`）提供 `.js` 文件——主流静态托管（Nginx/Apache/对象存储/CDN）默认都满足。入口是 `index.html`。
 
