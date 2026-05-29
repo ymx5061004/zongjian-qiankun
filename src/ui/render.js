@@ -194,6 +194,13 @@ export function renderMapList() {
 let shopGoods = []; // [{kind:'item'|'skill', obj}]
 export function getShopGood(idx) { return shopGoods[idx]; }
 
+// 把对象序列化成可安全嵌入「单引号」HTML 属性(data-tip)的串。
+// 否则 desc 里的 style='...' 单引号会提前闭合属性，把 JSON 泄漏成可见文本（洪荒孤本即此症）。
+// 仅需转义 & 与 '：getAttribute 读取时浏览器自动解码回原 JSON，tooltip 的 JSON.parse 照常工作。
+function tipAttr(obj) {
+    return JSON.stringify(obj).replace(/&/g, '&amp;').replace(/'/g, '&#39;');
+}
+
 export function renderShopGoods() {
     const player = state.player;
     const box = document.getElementById('shop-goods-box');
@@ -218,7 +225,7 @@ export function renderShopGoods() {
         card.className = "list-card";
         card.style.border = "1px solid var(--color-honghuang)";
         card.style.background = "linear-gradient(90deg, #1a050c 0%, #111 100%)";
-        card.innerHTML = `<span data-tip='${JSON.stringify(bookItem)}' style="cursor:help;"><strong class="q-hh">🔥 绝世孤本《${hhSkill.name}》 🔍</strong></span><button class="btn btn-danger" data-act="buy-skill" data-idx="${idx}">购买 (380000文)</button>`;
+        card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong class="q-hh">🔥 绝世孤本《${hhSkill.name}》 🔍</strong></span><button class="btn btn-danger" data-act="buy-skill" data-idx="${idx}">购买 (380000文)</button>`;
         box.appendChild(card);
         goodsCount = 5;
     }
@@ -229,7 +236,7 @@ export function renderShopGoods() {
         if (i <= 3) {
             const mockItem = generateItemByMatrix(player.realmLevel);
             const idx = shopGoods.push({ kind: 'item', obj: mockItem }) - 1;
-            card.innerHTML = `<span data-tip='${JSON.stringify(mockItem)}' style="cursor:help;"><b class="q-${mockItem.quality}">[装备] ${mockItem.name} 🔍</b></span><button class="btn btn-success" data-act="buy-item" data-idx="${idx}">购买 (${mockItem.price}文)</button>`;
+            card.innerHTML = `<span data-tip='${tipAttr(mockItem)}' style="cursor:help;"><b class="q-${mockItem.quality}">[装备] ${mockItem.name} 🔍</b></span><button class="btn btn-success" data-act="buy-item" data-idx="${idx}">购买 (${mockItem.price}文)</button>`;
         } else {
             // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/dropRate/coinRate），
             // 仅覆盖售价为固定 6000。原先此处手搓的对象漏了 power，主动技触发时伤害会算成 NaN。
@@ -237,7 +244,7 @@ export function renderShopGoods() {
             mockSkill.price = 6000;
             const bookItem = { name: `秘籍·《${mockSkill.name}》`, type: "book", payload: mockSkill, price: mockSkill.price };
             const idx = shopGoods.push({ kind: 'skill', obj: mockSkill }) - 1;
-            card.innerHTML = `<span data-tip='${JSON.stringify(bookItem)}' style="cursor:help;"><strong style="color:var(--color-gold);">📜 绝学《${mockSkill.name}》 🔍</strong></span><button class="btn btn-success" data-act="buy-skill" data-idx="${idx}">购买 (${mockSkill.price}文)</button>`;
+            card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong style="color:var(--color-gold);">📜 绝学《${mockSkill.name}》 🔍</strong></span><button class="btn btn-success" data-act="buy-skill" data-idx="${idx}">购买 (${mockSkill.price}文)</button>`;
         }
         box.appendChild(card);
     }
