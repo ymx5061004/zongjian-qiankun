@@ -1,0 +1,19 @@
+# 编辑器 / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 依赖 / 构建产物（当前纯前端零依赖，预留）
+node_modules/
+dist/
+build/
+
+# 日志 / 临时文件
+*.log
+*.tmp
