@@ -67,6 +67,12 @@
                     <button class="menu-item" data-act="switch-page" data-page="guide"><span class="menu-icon">📜</span>江湖秘典</button>
                 </div>
             </div>
+            <div class="menu-group">
+                <div class="menu-group-title" data-act="toggle-group">天机系统</div>
+                <div class="menu-items">
+                    <button class="menu-item" data-act="switch-page" data-page="save"><span class="menu-icon">💾</span>存档管理</button>
+                </div>
+            </div>
         </aside>
 
         <div class="game-content">
@@ -275,6 +281,21 @@
             <div class="sub-panel" style="grid-column: span 2;">
                 <div class="panel-title">📖 江湖秘典 · 全机制图解</div>
                 <div class="scroll-box guide-content" id="guide-content" style="max-height: 72vh;"></div>
+            </div>
+        </div>
+
+        <div id="page-save" class="page">
+            <div class="sub-panel" style="grid-column: span 2;">
+                <div class="panel-title">💾 存档管理 · 导入 / 导出</div>
+                <div class="scroll-box" style="line-height: 1.9; padding: 4px 2px;">
+                    <p style="color:#bbb;">把当前进度导出成一个<b style="color:var(--color-gold)">加密备份文件</b>（<b>.save</b>），换设备或换浏览器时可导入恢复。文件已加密，手动改动会导致校验失败、无法导入（防作弊）。</p>
+                    <p style="color:var(--color-accent);">⚠️ 导入会<b>覆盖</b>当前存档且不可撤销，建议先导出一份备份。</p>
+                    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:16px;">
+                        <button class="btn btn-success" data-act="export-save">⬇️ 导出存档</button>
+                        <button class="btn" data-act="import-save">⬆️ 导入存档</button>
+                    </div>
+                    <input type="file" id="import-file-input" accept=".save,.txt,application/octet-stream" style="display:none;">
+                </div>
             </div>
         </div>
         </div>

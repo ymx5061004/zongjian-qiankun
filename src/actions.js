@@ -10,7 +10,7 @@ import {
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
     rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse
 } from './ui/render.js';
-import { saveGame } from './storage.js';
+import { saveGame, exportSaveString, importSaveString } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
 import { formatNumber } from './util.js';
 
@@ -467,4 +467,62 @@ export function learnAllSkills() {
     saveGame();
     const tail = dup ? `，另有 ${dup} 本为已会武学（已留在行囊）。` : '。';
     toast(learned ? `✨ 参悟完毕：习得 ${learned} 门绝学${tail}` : `行囊中的秘籍均已学会。`, learned ? 'success' : 'error');
+}
+
+// —— 存档：导出为加密备份文件 ——
+function tsForFilename() {
+    // 文件名时间戳 yyyyMMdd-HHmm（本地时区）
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+export async function exportSaveFile() {
+    let data;
+    try {
+        data = await exportSaveString();
+    } catch (e) {
+        toast('导出失败：' + (e && e.message || e), 'error');
+        return;
+    }
+    try {
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `纵剑乾坤存档_${state.player.name || '无名'}_${tsForFilename()}.save`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast('✅ 存档已导出，请妥善保管备份文件。', 'success');
+    } catch (e) {
+        toast('导出失败：' + (e && e.message || e), 'error');
+    }
+}
+
+// —— 存档：从用户选择的文件导入（解密→确认覆盖→落盘→重载）——
+export async function importSaveFile(file) {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast('文件过大，不像是本游戏的存档。', 'error'); return; }
+    let player;
+    try {
+        const text = await file.text();
+        player = await importSaveString(text);
+    } catch (e) {
+        toast('导入失败：' + (e && e.message || e), 'error');
+        return;
+    }
+    const ok = await confirmDialog(
+        `将用存档「<b style="color:var(--color-gold)">${escapeHtml(player.name)}</b>」<b style="color:var(--color-accent)">覆盖当前进度</b>，此操作不可撤销。确定导入？`,
+        '导入存档'
+    );
+    if (!ok) return;
+    state.player = player;   // 替换引用（与 loadGame 同套路）
+    saveGame();              // 落盘新存档（顺带刷新 lastTickTime，重载后不会误判离线）
+    toast('✅ 存档已导入，正在重载…', 'success');
+    setTimeout(() => location.reload(), 600); // 重载让 init 全量重渲，零残留旧状态
 }

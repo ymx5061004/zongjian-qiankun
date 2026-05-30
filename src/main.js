@@ -21,7 +21,8 @@ import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
-    enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial
+    enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
+    exportSaveFile, importSaveFile
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -125,6 +126,8 @@ function onDelegatedClick(e) {
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
         case 'use-bag': hideTooltip(); useBagItem(Number(el.dataset.idx)); break;
         case 'guide-jump': { const t = document.getElementById(el.dataset.target); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); break; }
+        case 'export-save': exportSaveFile(); break;
+        case 'import-save': document.getElementById('import-file-input')?.click(); break; // 触发隐藏的文件选择框
     }
 }
 
@@ -133,6 +136,13 @@ function init() {
     loadGame();
     initTooltipEvent();
     initDragDrop();
+    // 存档导入：file input 的 change 不走 click 委托，单独绑。选完即清空 value，便于重选同一文件再次触发。
+    const importInput = document.getElementById('import-file-input');
+    if (importInput) importInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (file) importSaveFile(file);
+    });
     if (!state.player.name || state.player.name.trim() === "") {
         document.getElementById('create-role-overlay').style.display = 'flex';
     } else {
