@@ -276,3 +276,26 @@ export function upgradePlayerSkill(idx) {
     updatePlayerAttributes();
     saveGame();
 }
+
+// —— 一键参悟：把行囊中所有秘籍逐一学会。已会的武学（与单本参悟一致）保留在行囊，不丢弃。——
+export function learnAllSkills() {
+    const player = state.player;
+    if (!player.bag.some(it => it.type === 'book')) { toast("行囊中没有可参悟的秘籍。", 'error'); return; }
+    let learned = 0, dup = 0;
+    const remain = [];
+    player.bag.forEach(it => {
+        if (it.type !== 'book') { remain.push(it); return; }
+        const name = it.payload && it.payload.name;
+        if (!name) { remain.push(it); return; }                                  // 异常书，原样保留
+        if (player.skills.find(s => s.name === name)) { dup++; remain.push(it); return; } // 已会：保留书
+        player.skills.push(it.payload);
+        learned++;
+    });
+    player.bag = remain;
+    renderPlayerSkills();
+    renderBag();
+    updatePlayerAttributes();
+    saveGame();
+    const tail = dup ? `，另有 ${dup} 本为已会武学（已留在行囊）。` : '。';
+    toast(learned ? `✨ 参悟完毕：习得 ${learned} 门绝学${tail}` : `行囊中的秘籍均已学会。`, learned ? 'success' : 'error');
+}
