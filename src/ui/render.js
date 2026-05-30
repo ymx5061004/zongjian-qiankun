@@ -429,13 +429,26 @@ export function renderPlayerSkills() {
     });
 }
 
+// ---------- 左侧菜单抽屉开关（仅移动端 ≤768 生效：桌面侧栏常驻、无 .open 类，调用无副作用）----------
+export function toggleMenu() {
+    const sb = document.getElementById('nav-sidebar');
+    if (!sb) return;
+    const open = sb.classList.toggle('open');
+    document.getElementById('menu-overlay')?.classList.toggle('visible', open);
+}
+export function closeMenu() {
+    document.getElementById('nav-sidebar')?.classList.remove('open');
+    document.getElementById('menu-overlay')?.classList.remove('visible');
+}
+
 // ---------- 切换页签（tabEl 由委托传入，取代原全局 event.currentTarget）----------
 export function switchPage(pageId, tabEl) {
     hideTooltip();
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.menu-item').forEach(b => b.classList.remove('active'));
     document.getElementById(`page-${pageId}`).classList.add('active');
     if (tabEl) tabEl.classList.add('active');
+    closeMenu();   // 移动端：点菜单项后收起抽屉
     if (pageId === 'role' || pageId === 'bag') updatePlayerAttributes();
     if (pageId === 'kungfu') renderPlayerSkills();
     if (pageId === 'shop') renderShopGoods();

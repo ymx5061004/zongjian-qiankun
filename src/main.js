@@ -9,7 +9,8 @@ import { loadGame, saveGame } from './storage.js';
 import {
     initTooltipEvent, hideTooltip, switchPage,
     updatePlayerAttributes, renderForge, renderBag,
-    renderMapList, renderPlayerSkills, rollShopGoods
+    renderMapList, renderPlayerSkills, rollShopGoods,
+    toggleMenu, closeMenu
 } from './ui/render.js';
 import { startHangup, stopHangup } from './ui/battle.js';
 import { initDragDrop } from './ui/drag.js';
@@ -87,6 +88,9 @@ function onDelegatedClick(e) {
         case 'finalize-character': finalizeCharacter(); break;
         case 'enter-game': enterGame(); break;
         case 'switch-page': switchPage(el.dataset.page, el); break;
+        case 'toggle-menu': toggleMenu(); break;
+        case 'close-menu': closeMenu(); break;
+        case 'toggle-group': el.closest('.menu-group')?.classList.toggle('collapsed'); break;
         case 'breakthrough': playerBreakthrough(); break;
         case 'reborn': triggerReborn(); break;
         case 'unequip': unequip(el.dataset.slot); break;

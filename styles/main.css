@@ -29,16 +29,30 @@
         #story-overlay { display: none; position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(5,5,5,0.98); z-index: 998; flex-direction: column; justify-content: center; align-items: center; padding: 40px; box-sizing: border-box; }
         #story-text { color: var(--color-gold); font-size: 20px; line-height: 2.2; letter-spacing: 3px; max-width: 800px; text-align: center; margin-bottom: 40px; text-shadow: 0 0 15px rgba(241,196,15,0.4); min-height: 250px; font-family: "KaiTi", "楷体", serif; }
 
-        .game-header { background: #0b0b0b; padding: 15px 20px; border-bottom: 2px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+        .game-header { background: #0b0b0b; padding: 15px 20px; border-bottom: 2px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; position: relative; }
         .header-title { font-size: 26px; color: var(--color-gold); font-weight: bold; letter-spacing: 3px; text-shadow: 0 0 5px rgba(241,196,15,0.3); }
         .currency-bar { display: flex; gap: 25px; font-size: 14px; }
 
-        .nav-tabs { display: flex; background: #080808; border-bottom: 1px solid var(--border-color); }
-        .tab-btn { flex: 1; padding: 14px; background: none; border: none; color: var(--text-muted); font-size: 15px; cursor: pointer; transition: all 0.2s; text-align: center; font-weight: bold; }
-        .tab-btn:hover { color: var(--text-main); background: #111; }
-        .tab-btn.active { color: var(--color-gold); background: var(--bg-panel); border-bottom: 3px solid var(--color-gold); }
+        /* —— 左侧分组菜单（桌面常驻；移动端见 ≤768 媒体查询改为汉堡抽屉）—— */
+        #game-body { display: flex; align-items: stretch; }
+        .menu-toggle { display: none; background: none; border: none; color: var(--color-gold); font-size: 24px; line-height: 1; cursor: pointer; padding: 0; }
 
-        .game-content { padding: 20px; min-height: 600px; }
+        .nav-sidebar { flex-shrink: 0; width: 190px; background: #080808; border-right: 1px solid var(--border-color); padding: 14px 0; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+        .menu-group { padding: 2px 0; }
+        .menu-group + .menu-group { border-top: 1px solid #141414; }
+        .menu-group-title { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; color: var(--text-muted); font-size: 12px; font-weight: bold; letter-spacing: 1px; cursor: pointer; user-select: none; transition: color 0.15s; }
+        .menu-group-title::after { content: '▾'; font-size: 10px; opacity: 0.55; }
+        .menu-group.collapsed .menu-group-title::after { content: '▸'; }
+        .menu-group-title:hover { color: var(--text-main); }
+        .menu-group.collapsed .menu-items { display: none; }
+        .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 16px; background: none; border: none; border-left: 3px solid transparent; color: var(--text-muted); font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; transition: all 0.15s; }
+        .menu-item:hover { color: var(--text-main); background: #111; }
+        .menu-item.active { color: var(--color-gold); background: rgba(241,196,15,0.08); border-left-color: var(--color-gold); }
+        .menu-icon { width: 18px; text-align: center; flex-shrink: 0; font-size: 15px; }
+
+        #menu-overlay { display: none; }
+
+        .game-content { padding: 20px; min-height: 600px; flex: 1; min-width: 0; }
         .page { display: none; grid-template-columns: 1fr 1fr; gap: 20px; }
         .page.active { display: grid; }
 
@@ -185,15 +199,18 @@
 
             /* 顶栏：标题与货币纵向堆叠，货币可换行。
                min-height + 整条不折行，避免数值变长时顶栏高度跳变带动下方抖动 */
-            .game-header { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; min-height: 56px; box-sizing: border-box; }
+            .game-header { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 48px 12px 14px; min-height: 56px; box-sizing: border-box; }
             .header-title { font-size: 19px; letter-spacing: 1px; }
             .currency-bar { gap: 8px 16px; font-size: 12px; flex-wrap: wrap; }
             .currency-bar span { white-space: nowrap; }
 
-            /* 标签栏：横向可滑动，避免 5 个标签挤成一团 */
-            .nav-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; box-sizing: border-box; }
-            .nav-tabs::-webkit-scrollbar { display: none; }
-            .tab-btn { flex: 0 0 auto; padding: 12px 16px; font-size: 14px; white-space: nowrap; }
+            /* 左侧菜单：移动端收为左滑抽屉(off-canvas)，汉堡按钮在顶栏右上角唤出；点项/点遮罩/再点汉堡均收起 */
+            .menu-toggle { display: block; position: absolute; top: 12px; right: 14px; z-index: 2; }
+            #game-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+            .nav-sidebar { position: fixed; top: 0; left: -100%; width: min(264px, 82vw); height: 100vh; height: 100dvh; z-index: 1000; box-shadow: 2px 0 16px rgba(0,0,0,0.85); transition: left 0.28s ease; }
+            .nav-sidebar.open { left: 0; }
+            #menu-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 999; }
+            #menu-overlay.visible { display: block; }
 
             /* game-content 吃满窗口剩余高度并成为可滚动容器：
                列表页由内层 scroll-box 滚动(本身不溢出)；命格/征途等内容超高的页则由 game-content 自身滚动。 */
@@ -275,7 +292,7 @@
             .header-title { font-size: 17px; }
             .currency-bar { font-size: 11px; gap: 8px 10px; }
             .grid-container { grid-template-columns: repeat(4, 1fr); }
-            .tab-btn { padding: 11px 12px; font-size: 13px; }
+            .menu-item { font-size: 13px; padding: 11px 14px; }
             #sprite-player { left: 8px; }
             #sprite-enemy { right: 8px; }
         }

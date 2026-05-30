@@ -25,6 +25,7 @@
     </div>
 
     <div class="game-header">
+        <button id="menu-toggle" class="menu-toggle" data-act="toggle-menu" aria-label="菜单">☰</button>
         <div class="header-title">🥋 纵剑乾坤：百世轮回</div>
         <div class="currency-bar">
             <span>轮回印记: <b id="global-reborn" style="color: var(--color-purple);">0</b> 重</span>
@@ -33,16 +34,32 @@
         </div>
     </div>
 
-    <div class="nav-tabs">
-        <button class="tab-btn" data-act="switch-page" data-page="role">修真命格</button>
-        <button class="tab-btn" data-act="switch-page" data-page="adventure">百关征途</button>
-        <button class="tab-btn active" data-act="switch-page" data-page="bag">行囊与洪炉</button>
-        <button class="tab-btn" data-act="switch-page" data-page="kungfu">百修秘籍</button>
-        <button class="tab-btn" data-act="switch-page" data-page="shop">珍宝黑市</button>
-        <button class="tab-btn" data-act="switch-page" data-page="guide">📖 江湖秘典</button>
-    </div>
+    <div id="game-body">
+        <aside class="nav-sidebar" id="nav-sidebar">
+            <div class="menu-group">
+                <div class="menu-group-title" data-act="toggle-group">修行历练</div>
+                <div class="menu-items">
+                    <button class="menu-item" data-act="switch-page" data-page="role"><span class="menu-icon">👤</span>修真命格</button>
+                    <button class="menu-item" data-act="switch-page" data-page="adventure"><span class="menu-icon">⚔️</span>百关征途</button>
+                </div>
+            </div>
+            <div class="menu-group">
+                <div class="menu-group-title" data-act="toggle-group">行囊武学</div>
+                <div class="menu-items">
+                    <button class="menu-item active" data-act="switch-page" data-page="bag"><span class="menu-icon">🎒</span>行囊与洪炉</button>
+                    <button class="menu-item" data-act="switch-page" data-page="kungfu"><span class="menu-icon">📖</span>百修秘籍</button>
+                </div>
+            </div>
+            <div class="menu-group">
+                <div class="menu-group-title" data-act="toggle-group">江湖商市</div>
+                <div class="menu-items">
+                    <button class="menu-item" data-act="switch-page" data-page="shop"><span class="menu-icon">💰</span>珍宝黑市</button>
+                    <button class="menu-item" data-act="switch-page" data-page="guide"><span class="menu-icon">📜</span>江湖秘典</button>
+                </div>
+            </div>
+        </aside>
 
-    <div class="game-content">
+        <div class="game-content">
         <div id="page-role" class="page">
             <div class="sub-panel">
                 <div class="panel-title">角色命格根骨</div>
@@ -194,7 +211,9 @@
                 <div class="scroll-box guide-content" id="guide-content" style="max-height: 72vh;"></div>
             </div>
         </div>
+        </div>
     </div>
+    <div id="menu-overlay" data-act="close-menu"></div>
 </div>
 
 <script type="module" src="src/main.js"></script>
