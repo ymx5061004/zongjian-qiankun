@@ -39,6 +39,7 @@
         <button class="tab-btn active" data-act="switch-page" data-page="bag">行囊与洪炉</button>
         <button class="tab-btn" data-act="switch-page" data-page="kungfu">百修秘籍</button>
         <button class="tab-btn" data-act="switch-page" data-page="shop">珍宝黑市</button>
+        <button class="tab-btn" data-act="switch-page" data-page="guide">📖 江湖秘典</button>
     </div>
 
     <div class="game-content">
@@ -184,6 +185,13 @@
                     <button class="btn" style="padding:2px 8px;" data-act="refresh-shop">手动消耗500文刷新</button>
                 </div>
                 <div class="scroll-box" id="shop-goods-box"></div>
+            </div>
+        </div>
+
+        <div id="page-guide" class="page">
+            <div class="sub-panel" style="grid-column: span 2;">
+                <div class="panel-title">📖 江湖秘典 · 全机制图解</div>
+                <div class="scroll-box guide-content" id="guide-content" style="max-height: 72vh;"></div>
             </div>
         </div>
     </div>

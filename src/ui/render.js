@@ -3,7 +3,7 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS } from '../config.js';
 import { state } from '../state.js';
 import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix } from '../domain.js';
 import { formatNumber } from '../util.js';
@@ -400,4 +400,193 @@ export function switchPage(pageId, tabEl) {
     if (pageId === 'shop') renderShopGoods();
     if (pageId === 'adventure') renderMapList();
     if (pageId === 'bag') renderForge();
+    if (pageId === 'guide') renderGuide();
+}
+
+// ---------- 江湖秘典：游戏全机制说明（只读静态页）----------
+// 数值一律从 config / BALANCE / domain 现算生成，与实战同源、永不漂移。
+// 调平衡只改 config.js，本页自动跟随更新（不要在此手写魔法数字）。
+export function renderGuide() {
+    const box = document.getElementById('guide-content');
+    if (!box) return;
+    const B = BALANCE, bt = B.battle, rw = B.reward;
+
+    // —— 品阶概率：由 qualityRoll 区间反推（自上而下命中，余数归 q0）——
+    const qProbs = [];
+    let prev = 100;
+    B.qualityRoll.forEach(t => { qProbs.push({ q: t.q, pct: +(prev - t.min).toFixed(1) }); prev = t.min; });
+    qProbs.push({ q: 0, pct: +prev.toFixed(1) });
+    qProbs.sort((a, b) => a.q - b.q);
+    const qualityRows = qProbs.map(p =>
+        `<tr><td style="color:${QUALITY_COLORS[p.q]};font-weight:bold;">${p.q} · ${QUALITY_NAMES[p.q]}</td>` +
+        `<td>${p.pct}%</td><td>${formatNumber(Math.floor(B.itemPrice.base * Math.pow(B.itemPrice.growth, p.q)))} 文</td></tr>`
+    ).join('');
+
+    // —— 角色属性总表 ——
+    const attrs = [
+        ['气血', '250', '生命上限，每场战斗满血开打；归零即战败。', '破境 +' + B.breakthrough.hpGain + '/重 · 装备 · 神功(+150/重) · 轮回乘区 · 洪荒乘区'],
+        ['攻击', '35', '每次出手的基础伤害值。', '破境 +' + B.breakthrough.atkGain + '/重 · 装备 · 神功(+30)/真卷(+40) · 轮回乘区 · 洪荒乘区'],
+        ['防御', '15', '减免每次受到的伤害（实伤 = 攻 − 防，至少 1）。', '破境 +' + B.breakthrough.defGain + '/重 · 装备 · 心法(+20/重) · 轮回乘区 · 洪荒乘区'],
+        ['暴击率', '5%', '每回合触发暴击的概率；暴击伤害 ×' + bt.critMult + '。', '装备 · 真卷(+1.5%/重) · 洪荒乘区（<b>不</b>吃轮回乘区）'],
+        ['闪避率', '5%', '敌人攻击时「完全免伤」的概率（全有或全无）。', '装备 · 心法(+1.5%/重) · 洪荒乘区（<b>不</b>吃轮回乘区）'],
+        ['洪荒之力', '0%', '洪荒功法的当前重数；每重令五维总量 ×(1+' + (B.honghuangMultPerLevel * 100) + '%)。', '修炼洪荒功法（黑市孤本 / 洪炉融合，最高 ' + B.skill.hhMaxLevel + ' 重）'],
+        ['掉宝率', '100%', '最终掉落概率 = ' + (rw.baseDrop * 100) + '% × 掉宝率/100。', '寻龙诀(+15%/重)'],
+        ['财运率', '100%', '碎银收益 = 基础值 × 财运率/100。', '招财秘录(+15%/重)'],
+        ['境界', '后天1重', '决定可解锁的关卡上限。', '破境冲关（耗修为）；轮回时重置为 1'],
+        ['修为', '0', '破境与研习秘籍的资源（战斗收益不受任何加成）。', '战斗胜利'],
+        ['碎银', '50000', '通用货币：黑市购买、洪炉融合灵力。', '战斗胜利 · 熔炼装备 · 战败损失 5%'],
+        ['轮回印记', '0', '渡劫轮回的次数，每次令 气血/攻击/防御 永久 ×(1+' + (B.rebornMultPerCount * 100) + '%)。', '渡劫轮回（境界 ≥ ' + B.reborn.minLevel + '）'],
+    ];
+    const attrRows = attrs.map(a =>
+        `<tr><td style="color:var(--color-gold);font-weight:bold;white-space:nowrap;">${a[0]}</td><td style="white-space:nowrap;">${a[1]}</td><td>${a[2]}</td><td style="color:#999;">${a[3]}</td></tr>`
+    ).join('');
+
+    // —— 装备六部位（系数取自 domain.generateItemByMatrix）——
+    const slotInfo = [
+        ['兵刃 weapon', '攻击 ⌊22×倍率⌋', '品阶 ≥3 附带暴击'],
+        ['暗器 subweapon', '攻击 ⌊12×倍率⌋', '品阶 ≥3 附带暴击'],
+        ['防具 armor', '防御 ⌊10×倍率⌋ ＋ 气血 ⌊50×倍率⌋', '—'],
+        ['头盔 helm', '防御 ⌊6×倍率⌋ ＋ 气血 ⌊40×倍率⌋', '—'],
+        ['配饰 ring', '气血 ⌊80×倍率⌋', '品阶 ≥3 附带闪避（≤75%）'],
+        ['法宝 artifact', '攻⌊10×⌋＋防⌊6×⌋＋血⌊60×⌋', '品阶 ≥4 附带暴击＋闪避'],
+    ];
+    const slotRows = slotInfo.map(s => `<tr><td style="white-space:nowrap;">${s[0]}</td><td>${s[1]}</td><td style="color:#999;">${s[2]}</td></tr>`).join('');
+
+    // —— 秘籍：主动 / 被动（来自 SKILL_SUFFIXES）——
+    const actives = SKILL_SUFFIXES.filter(s => s.type === 'active');
+    const passives = SKILL_SUFFIXES.filter(s => s.type === 'passive');
+    const activeRows = actives.map(s =>
+        `<tr><td style="color:var(--color-orange);white-space:nowrap;">…${s.name}</td><td>${s.power} 倍</td><td style="color:#999;">${s.desc}${s.healRate ? `（吸血 ${Math.round(s.healRate * 100)}%）` : ''}</td></tr>`
+    ).join('');
+    const passiveRows = passives.map(s => {
+        const parts = [];
+        if (s.hp) parts.push(`气血+${s.hp}`);
+        if (s.atk) parts.push(`攻击+${s.atk}`);
+        if (s.def) parts.push(`防御+${s.def}`);
+        if (s.crit) parts.push(`暴击+${s.crit}%`);
+        if (s.dodge) parts.push(`闪避+${s.dodge}%`);
+        if (s.dropRate) parts.push(`掉宝+${s.dropRate}%`);
+        if (s.coinRate) parts.push(`财运+${s.coinRate}%`);
+        return `<tr><td style="color:var(--color-blue);white-space:nowrap;">…${s.name}</td><td style="white-space:nowrap;">${parts.join('　')}</td><td style="color:#999;">每重永久叠加</td></tr>`;
+    }).join('');
+
+    // —— 关卡 / 敌人示例（难度 = 2^(关卡-1)）——
+    const sampleMaps = [1, 2, 3, 5, 8, 10, 15, 20, 25, 30];
+    const mapRows = sampleMaps.map(id => {
+        const diff = Math.pow(2, id - 1);
+        const req = Math.floor((id - 1) * 1.1) + 1;
+        return `<tr><td style="white-space:nowrap;">${id} · ${MAP_NAMES[id - 1]}</td><td>${formatNumber(Math.floor(B.enemy.baseHp * diff))}</td><td>${formatNumber(Math.floor(B.enemy.baseAtk * diff))}</td><td>${formatNumber(Math.floor(B.enemy.baseDef * diff))}</td><td style="white-space:nowrap;">${getRealmName(req)}</td></tr>`;
+    }).join('');
+
+    // —— 境界阶梯 ——
+    const realmLadder = REALMS.map((r, i) => `${r}<span style="color:#666;">(${i * 10 + 1}~${i * 10 + 10}级)</span>`).join(' → ');
+
+    const toc = [
+        ['sec-loop', '核心循环'], ['sec-attr', '属性详解'], ['sec-battle', '战斗机制'],
+        ['sec-formula', '属性公式'], ['sec-map', '关卡敌人'], ['sec-equip', '装备系统'],
+        ['sec-skill', '秘籍系统'], ['sec-forge', '天地洪炉'], ['sec-shop', '珍宝黑市'],
+        ['sec-grow', '破境轮回'], ['sec-tips', '进阶心法'],
+    ];
+    const tocHtml = toc.map(t => `<a data-act="guide-jump" data-target="${t[0]}">${t[1]}</a>`).join('');
+
+    box.innerHTML = `
+    <div class="guide-toc">${tocHtml}</div>
+
+    <h3 id="sec-loop">① 核心循环</h3>
+    <p>这是一款<b>放置(挂机)武侠养成</b>游戏。核心循环：</p>
+    <p style="text-align:center;color:var(--color-gold);font-weight:bold;">挂机征战 → 掉装备·赚碎银修为 → 强化(装备/秘籍/洪炉/破境) → 解锁更高关卡 → 渡劫轮回质变 → 再战更深禁区</p>
+    <p>在「百关征途」点【挑战】即开始<b>自动战斗</b>（每 ${bt.intervalMs / 1000} 秒一场）。胜利得碎银、修为、随机战利品；战败损失少量碎银并自动退回安全区。你的目标：让五维属性追上指数级增长的关卡难度，一路推进到第 100 关「虚空尽头」。</p>
+
+    <h3 id="sec-attr">② 角色属性详解</h3>
+    <table class="guide-table"><thead><tr><th>属性</th><th>初始</th><th>作用</th><th>来源</th></tr></thead><tbody>${attrRows}</tbody></table>
+    <div class="guide-note">⚔️ <b>暴击率 / 闪避率</b>只受装备、秘籍、洪荒之力影响，<b>不</b>吃轮回乘区；而气血/攻击/防御三维则同时享受轮回乘区与洪荒乘区的双重放大。</div>
+
+    <h3 id="sec-battle">③ 战斗机制（伤害·暴击·闪避）</h3>
+    <p>战斗为<b>纯回合制自动演算</b>：<b>你方先手出招，敌方后手反击</b>，最多 ${bt.maxRounds} 回合。每回合流程：</p>
+    <div class="guide-formula"><b>【你方出手】</b>
+1. 暴击判定：随机数(0~100) &lt; 暴击率 → 暴击
+2. 基础伤害 = 攻击力
+3. 主动技判定：${bt.activeSkillChance * 100}% 概率施展（拥有多门主动技时随机择一）
+     施展 → 伤害 ×（招式倍率 ＋ 招式重数 × ${bt.activeLevelScale}）
+4. 若暴击 → 伤害 ×${bt.critMult}
+5. 对敌实伤 = max(1, 伤害 − 敌方防御)
+6. 吸血(噬血类)：回血 = ⌊实伤 × 吸血率⌋（不超过气血上限）
+   ▶ 敌方气血 ≤ 0 → 立即<span style="color:var(--color-success)">胜利</span>
+
+<b>【敌方反击】</b>（敌方存活时）
+7. 闪避判定：随机数(0~100) &lt; 闪避率 → 完全闪避（受到 0 伤害）
+8. 未闪避 → 受到伤害 = max(1, 敌方攻击 − 你方防御)
+   ▶ 你方气血 ≤ 0 → 立即<span style="color:var(--color-accent)">战败</span></div>
+    <div class="guide-tip">💡 关键规则：<br>• <b>伤害下限为 1</b>——再厚的防御也挡不到「完全免伤」，但能把伤害压到极低。<br>• <b>闪避是全有或全无</b>：触发即免疫该次<b>全部</b>伤害，否则全额承受。<br>• <b>敌人不会暴击、也不会闪避</b>——暴击只属于你的进攻，闪避只属于你的防守。<br>• <b>撑满 ${bt.maxRounds} 回合不分胜负 → 只要你存活即判胜</b>。高血+高防+高闪可「磨」过一时打不动的强敌。</div>
+
+    <h3 id="sec-formula">④ 属性结算公式</h3>
+    <p>面板上的最终属性，由「基础值 → 轮回放大 → 加被动/装备 → 洪荒放大」逐层结算：</p>
+    <div class="guide-formula">轮回乘区 = 1 ＋ 轮回印记 × ${B.rebornMultPerCount}
+洪荒乘区 = 1 ＋ 洪荒之力 × ${B.honghuangMultPerLevel}
+
+气血 / 攻击 / 防御 = ⌊( ⌊基础值 × 轮回乘区⌋ ＋ Σ被动×重数 ＋ Σ装备 ) × 洪荒乘区⌋
+暴击率 / 闪避率   = ( 基础值 ＋ Σ被动×重数 ＋ Σ装备 ) × 洪荒乘区   ← 不乘轮回乘区
+掉宝率 / 财运率   = 100% ＋ Σ被动×重数                          ← 不受任何乘区</div>
+    <p style="color:#999;">举例：洪荒功法满 ${B.skill.hhMaxLevel} 重时，洪荒乘区 = 1 + ${B.skill.hhMaxLevel}×${B.honghuangMultPerLevel} = <b style="color:var(--color-honghuang)">×${(1 + B.skill.hhMaxLevel * B.honghuangMultPerLevel).toFixed(0)}</b>（五维总量 +${(B.skill.hhMaxLevel * B.honghuangMultPerLevel * 100).toFixed(0)}%）；每渡劫一次，三维再永久 ×(1+${B.rebornMultPerCount}) 叠乘。</p>
+
+    <h3 id="sec-map">⑤ 关卡与敌人</h3>
+    <p>全程共 <b>100 关</b>，难度<b>每关翻倍</b>（难度 = 2^(关卡-1)）。敌人属性 = 基础(血 ${B.enemy.baseHp} / 攻 ${B.enemy.baseAtk} / 防 ${B.enemy.baseDef}) × 难度。解锁条件：境界 ≥ ⌊(关卡-1)×1.1⌋+1。</p>
+    <table class="guide-table"><thead><tr><th>关卡</th><th>敌·气血</th><th>敌·攻击</th><th>敌·防御</th><th>准入境界</th></tr></thead><tbody>${mapRows}</tbody></table>
+    <div class="guide-note">📈 难度呈指数膨胀：第 30 关已是第 1 关的 2²⁹ ≈ 5.4 亿倍，第 100 关更达 2⁹⁹ 倍（天文数字）。仅靠破境的线性成长远远不够——<b>洪荒之力与轮回印记的乘区</b>才是穿透深层禁区的关键。</p></div>
+    <h4>战斗收益</h4>
+    <ul>
+      <li><b>胜利</b>：碎银 = ⌊(${rw.coinBase} + 关卡×${rw.coinPerMap}) × 财运率/100⌋；修为 = ${rw.expBase} + 关卡×${rw.expPerMap}（不受加成）。</li>
+      <li><b>掉落</b>：概率 = ${rw.baseDrop * 100}% × 掉宝率/100，触发则按当前关卡掉落一件随机装备（关卡越深，品质倍率越高）。</li>
+      <li><b>战败</b>：损失当前碎银的 ${rw.loseCoinRate * 100}%，并停止挂机退回安全区（碎银不会变负）。</li>
+    </ul>
+
+    <h3 id="sec-equip">⑥ 装备系统</h3>
+    <p>共 6 个部位，6 档品阶。掉落/购买时随机决定品阶，品质倍率 = (品阶+1) × (1 + (来源等级 mod 3) × 0.4)。</p>
+    <table class="guide-table"><thead><tr><th>品阶</th><th>出现概率</th><th>回收价</th></tr></thead><tbody>${qualityRows}</tbody></table>
+    <table class="guide-table"><thead><tr><th>部位</th><th>主属性</th><th>高阶附加</th></tr></thead><tbody>${slotRows}</tbody></table>
+    <p style="color:#999;">在「行囊」点击物品可<b>披挂上身 / 投入洪炉 / 熔炼换银</b>；也可拖拽入炉（手机长按拖动）。熔炼按品阶批量回收碎银。</p>
+
+    <h3 id="sec-skill">⑦ 秘籍系统</h3>
+    <p>秘籍分三类：<b style="color:var(--color-orange)">主动招式</b>（战斗中触发、按倍率打伤害）、<b style="color:var(--color-blue)">被动功法</b>（永久叠加属性）、<b style="color:var(--color-honghuang)">洪荒法则</b>（独一档的全属性乘区）。</p>
+    <h4>主动招式（每回合 ${bt.activeSkillChance * 100}% 概率施展其一）</h4>
+    <table class="guide-table"><thead><tr><th>招式</th><th>基础倍率</th><th>功效（每重 +${bt.activeLevelScale} 倍）</th></tr></thead><tbody>${activeRows}</tbody></table>
+    <h4>被动功法（每重永久叠加）</h4>
+    <table class="guide-table"><thead><tr><th>功法</th><th>每重加成</th><th>说明</th></tr></thead><tbody>${passiveRows}</tbody></table>
+    <h4>研习（升级）花费</h4>
+    <ul>
+      <li>普通秘籍：最高 <b>${B.skill.normalMaxLevel}</b> 重，升级耗修为 = 当前重数 × ${B.skill.normalUpgradeCostPerLevel}。</li>
+      <li>洪荒功法：最高 <b>${B.skill.hhMaxLevel}</b> 重，升级耗修为 = 当前重数 × ${formatNumber(B.skill.hhUpgradeCostPerLevel)}；每重洪荒之力 +1%（五维总量 +2%）。</li>
+      <li>在「百修秘籍」可点【一键参悟行囊秘籍】把背包里所有秘籍一次性学会（已会的保留）。</li>
+    </ul>
+
+    <h3 id="sec-forge">⑧ 天地洪炉（万物合成）</h3>
+    <p>放入两件物品融合，启动花费 = ⌊(物品A售价 + 物品B售价) × ${B.forge.costRate}⌋ + ${B.forge.costBase} 文。三种配方：</p>
+    <table class="guide-table"><thead><tr><th>配方</th><th>产物</th></tr></thead><tbody>
+      <tr><td style="white-space:nowrap;">装备 ＋ 装备</td><td>进阶装备：取两者较高品阶为底，同阶 ${B.forge.upgradeSameQ * 100}% / 异阶 ${B.forge.upgradeDiffQ * 100}% 概率<b>品阶+1</b>（升阶冠「灵铸」）。洪炉装备属性高于野生掉落。</td></tr>
+      <tr><td style="white-space:nowrap;">秘籍 ＋ 秘籍</td><td>「绝世」功法：倍率 ×1.5、属性翻倍。若任一为洪荒孤本，则 40% 概率融出<b style="color:var(--color-honghuang)">洪荒法则·混沌诀</b>。</td></tr>
+      <tr><td style="white-space:nowrap;">装备 ＋ 秘籍</td><td>「附魔」神器：装备品阶+1，并把秘籍属性<b>放大 ${B.forge.enchantPayloadMult} 倍</b>灌注其上（主动技按倍率折算成攻击+暴击）。</td></tr>
+    </tbody></table>
+
+    <h3 id="sec-shop">⑨ 珍宝黑市</h3>
+    <p>每次进入/购买都会刷新一批货：通常 6 件（3 装备 ＋ 3 普通秘籍，秘籍定价 6000 文）。有 <b>${B.shopHHChance * 100}%</b> 概率刷出<b style="color:var(--color-honghuang)">洪荒孤本《老区长混沌诀》</b>（售价 ${formatNumber(B.hhSkillPrice)} 文），此时普通货位减为 5 件。孤本是开启「洪荒之力」乘区的关键，遇到务必抢购。</p>
+
+    <h3 id="sec-grow">⑩ 破境冲关 与 渡劫轮回</h3>
+    <h4>破境冲关（线性成长）</h4>
+    <p>消耗修为 = 当前境界 × ${B.breakthrough.costPerLevel}，境界 +1，基础 气血+${B.breakthrough.hpGain} / 攻击+${B.breakthrough.atkGain} / 防御+${B.breakthrough.defGain}。境界阶梯：</p>
+    <p style="color:#999;font-size:12px;">${realmLadder} → 至高封神…</p>
+    <h4>渡劫轮回（质变成长）</h4>
+    <p>境界达到 <b>${B.reborn.minLevel}</b> 级后可渡劫：境界重置为 1、基础属性回到 ${B.reborn.baseHp}/${B.reborn.baseAtk}/${B.reborn.baseDef}，但<b>轮回印记 +1</b>，此后 气血/攻击/防御 永久 ×(1 + 印记 × ${B.rebornMultPerCount})。</p>
+    <div class="guide-tip">💡 轮回会清空累积的破境加成，但<b>装备、秘籍、碎银、修为全部保留</b>。当一次 +${B.rebornMultPerCount * 100}% 的全局乘区收益 ＞ 你已堆出的破境收益时，渡劫就是净赚——这是后期战力翻倍的主引擎。</div>
+
+    <h3 id="sec-tips">⑪ 进阶心法（攻略要点）</h3>
+    <ul>
+      <li><b>攻防双吃乘区</b>：气血/攻击/防御同时享受轮回×洪荒双乘，是性价比最高的成长，优先堆叠。</li>
+      <li><b>破防优于堆攻</b>：实伤 = 攻 − 敌防，深层敌人防御极高，单纯堆攻收益递减；主动技倍率与暴击 ×${bt.critMult} 是放大输出的乘法手段。</li>
+      <li><b>闪避是软减伤上限</b>：闪避触发即全免，配合高血量可把「撑满 ${bt.maxRounds} 回合判胜」变成稳定打法去越级磨怪。</li>
+      <li><b>洪荒之力是分水岭</b>：黑市孤本/洪炉融合获得洪荒功法后，每重都让五维总量再涨一截，是穿透指数级关卡的根本。</li>
+      <li><b>该轮回就轮回</b>：到 ${B.reborn.minLevel} 级后别死磕境界，及时渡劫吃 +${B.rebornMultPerCount * 100}% 乘区，比线性破境快得多。</li>
+      <li><b>资源分配</b>：修为同时用于破境与升级秘籍，碎银用于黑市与洪炉——前期多熔炼回血，攒钱抢孤本。</li>
+    </ul>
+    <p style="text-align:center;color:#666;font-size:12px;margin-top:18px;">— 本页数值均由游戏配置实时生成，与实战完全一致 —</p>
+    `;
 }

@@ -135,6 +135,31 @@
         .comp-down { color: #e74c3c; }
         .comp-equal { color: #888; }
 
+        /* —— 江湖秘典（游戏全机制说明，只读静态页）—— */
+        .guide-content { font-size: 13px; line-height: 1.75; }
+        .guide-content h3 { color: var(--color-gold); font-size: 17px; margin: 26px 0 10px; padding: 6px 0 6px 12px; border-left: 4px solid var(--color-gold); border-bottom: 1px solid var(--border-color); letter-spacing: 1px; scroll-margin-top: 64px; }
+        .guide-content h3:first-of-type { margin-top: 4px; }
+        .guide-content h4 { color: var(--color-blue); font-size: 14px; margin: 16px 0 6px; }
+        .guide-content p { margin: 7px 0; color: #b8b8b8; }
+        .guide-content ul { margin: 7px 0; padding-left: 22px; }
+        .guide-content li { margin: 5px 0; color: #b8b8b8; }
+        .guide-content b, .guide-content strong { color: var(--text-main); }
+
+        .guide-toc { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; position: sticky; top: 0; background: #181818; padding: 10px 4px; z-index: 2; border-bottom: 1px solid var(--border-color); }
+        .guide-toc a { background: #111; border: 1px solid #2c2c2c; color: var(--color-gold); padding: 5px 12px; border-radius: 14px; font-size: 12px; cursor: pointer; font-weight: bold; transition: all 0.15s; }
+        .guide-toc a:hover { border-color: var(--color-gold); background: #2c1a0c; }
+
+        .guide-formula { background: #0a0a0a; border: 1px solid #222; border-left: 3px solid var(--color-orange); border-radius: 4px; padding: 10px 14px; margin: 10px 0; font-family: 'Consolas', monospace; font-size: 12px; color: #cfd6dd; line-height: 1.7; white-space: pre-wrap; overflow-x: auto; }
+
+        .guide-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+        .guide-table th, .guide-table td { border: 1px solid #222; padding: 7px 9px; text-align: left; vertical-align: top; }
+        .guide-table th { background: #1c1c1c; color: var(--color-gold); font-weight: bold; white-space: nowrap; }
+        .guide-table tr:nth-child(even) td { background: #0e0e0e; }
+
+        .guide-note { background: rgba(241,196,15,0.06); border: 1px solid rgba(241,196,15,0.22); border-radius: 5px; padding: 9px 13px; margin: 12px 0; font-size: 12px; color: #d4c178; line-height: 1.7; }
+        .guide-tip { background: rgba(46,204,113,0.06); border: 1px solid rgba(46,204,113,0.22); border-radius: 5px; padding: 9px 13px; margin: 12px 0; font-size: 12px; color: #8fd9ab; line-height: 1.7; }
+        .guide-tip b, .guide-note b { color: #fff; }
+
         /* ============================================================
            响应式适配（移动端 / 平板）。桌面端 (>1024px) 布局完全不变。
            断点：平板 ≤1024，手机 ≤768，小屏手机 ≤400。
@@ -207,6 +232,15 @@
             .strike-dash-right { transform: translateX(40vw) scale(1.05) !important; }
             .strike-dash-left { transform: translateX(-40vw) scale(1.05) !important; }
             #battle-log { font-size: 11px; max-height: 32vh; }
+
+            /* 江湖秘典：缩排表格/公式，避免窄屏溢出；TOC 收紧 */
+            .guide-content { font-size: 12px; }
+            .guide-content h3 { font-size: 15px; margin-top: 20px; scroll-margin-top: 56px; }
+            .guide-table { font-size: 11px; }
+            .guide-table th, .guide-table td { padding: 5px 6px; }
+            .guide-formula { font-size: 11px; padding: 9px 10px; }
+            .guide-toc { gap: 6px; padding: 8px 2px; }
+            .guide-toc a { padding: 4px 9px; font-size: 11px; }
 
             /* 开场剧情 / 创角弹窗 */
             #story-overlay { padding: 24px; }

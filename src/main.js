@@ -102,6 +102,7 @@ function onDelegatedClick(e) {
         case 'buy-item': buyShopItem(Number(el.dataset.idx)); break;
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
         case 'use-bag': hideTooltip(); useBagItem(Number(el.dataset.idx)); break;
+        case 'guide-jump': { const t = document.getElementById(el.dataset.target); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); break; }
     }
 }
 
