@@ -17,7 +17,7 @@ import { toast } from './ui/dialog.js';
 import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
-    useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills
+    useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -98,6 +98,7 @@ function onDelegatedClick(e) {
         case 'smelt-all': smeltAllItems(); break;
         case 'refresh-shop': renderShopGoods(); break;
         case 'upgrade-skill': upgradePlayerSkill(Number(el.dataset.idx)); break;
+        case 'forget-skill': forgetSkill(Number(el.dataset.idx)); break;
         case 'learn-all': learnAllSkills(); break;
         case 'buy-item': buyShopItem(Number(el.dataset.idx)); break;
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;

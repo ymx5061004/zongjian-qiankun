@@ -89,6 +89,7 @@
         body.dragging-active, body.dragging-active * { cursor: grabbing !important; }
 
         .list-card { background: #111; border: 1px solid #222; padding: 12px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
+        .skill-btns { display: flex; gap: 6px; flex-shrink: 0; }
         .prop-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; background: #111; padding: 6px 10px; border-radius: 4px; border: 1px solid #1a1a1a; position: relative; }
 
         #battle-view-container { display: flex; flex-direction: column; gap: 10px; height: 500px; }
@@ -213,6 +214,8 @@
             /* 列表卡片：按钮换行铺满，便于点按 */
             .list-card { flex-wrap: wrap; gap: 8px; padding: 12px 10px; }
             .list-card > button { width: 100%; padding: 10px; }
+            .list-card > .skill-btns { width: 100%; }
+            .list-card > .skill-btns > .btn { flex: 1; padding: 10px; }
 
             .scroll-box { max-height: 52vh; }
 

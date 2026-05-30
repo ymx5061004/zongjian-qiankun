@@ -413,7 +413,10 @@ export function renderPlayerSkills() {
         }
 
         const tip = tipAttr({ kind: 'skill', sk }); // 详情卡数据；tipAttr 转义单引号，避免洪荒 desc 截断属性
-        card.innerHTML = `<div><span data-tip='${tip}' style="cursor:help;"><strong class="${isHH ? 'q-hh' : ''}">《${sk.name}》 🔍</strong></span> <span style="color:var(--color-gold);">[第${sk.level}/${maxLevel}重]</span><br><small style="color:var(--text-muted)">${eff}</small></div><button class="btn" ${sk.level >= maxLevel ? 'disabled' : ''} data-act="upgrade-skill" data-idx="${index}">${sk.level >= maxLevel ? '已至化境' : `潜心研习(耗${formatNumber(cost)}修为)`}</button>`;
+        const upgradeBtn = `<button class="btn" ${sk.level >= maxLevel ? 'disabled' : ''} data-act="upgrade-skill" data-idx="${index}">${sk.level >= maxLevel ? '已至化境' : `潜心研习(耗${formatNumber(cost)}修为)`}</button>`;
+        // 仅「主动招式」可遗忘（精简主动技池、提高强招触发率）；被动/洪荒不显示遗忘按钮。
+        const forgetBtn = (sk.type === 'active' && !isHH) ? `<button class="btn btn-danger" style="padding:8px 10px;" data-act="forget-skill" data-idx="${index}">遗忘</button>` : '';
+        card.innerHTML = `<div><span data-tip='${tip}' style="cursor:help;"><strong class="${isHH ? 'q-hh' : ''}">《${sk.name}》 🔍</strong></span> <span style="color:var(--color-gold);">[第${sk.level}/${maxLevel}重]</span><br><small style="color:var(--text-muted)">${eff}</small></div><div class="skill-btns">${upgradeBtn}${forgetBtn}</div>`;
         box.appendChild(card);
     });
 }

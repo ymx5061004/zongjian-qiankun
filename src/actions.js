@@ -282,6 +282,25 @@ export function upgradePlayerSkill(idx) {
     saveGame();
 }
 
+// —— 遗忘功法：仅限「主动招式」。多门主动技会稀释每门的触发概率(40%÷门数)，故需要精简手段；
+//    被动功法是永久增益、洪荒功法乃立身根本，均不提供遗忘（按钮层也不显示，这里再做一层防御）。——
+export async function forgetSkill(idx) {
+    const player = state.player;
+    const sk = player.skills[idx];
+    if (!sk) return;
+    if (sk.isHongHuang) { toast("洪荒功法乃立身根本，不可遗忘！", 'error'); return; }
+    if (sk.type !== 'active') { toast("被动功法是永久根基，无需遗忘。", 'error'); return; }
+    const ok = await confirmDialog(`确定遗忘主动招式《${sk.name}》吗？遗忘后永久消失、不返还秘籍。`);
+    if (!ok) return;
+    const curIdx = player.skills.indexOf(sk); // 异步确认期间数组可能变动，按引用重新定位
+    if (curIdx === -1) { toast("该功法已不在身上。", 'error'); return; }
+    player.skills.splice(curIdx, 1);
+    toast(`已遗忘《${sk.name}》，神识清明。`, 'success');
+    renderPlayerSkills();
+    updatePlayerAttributes();
+    saveGame();
+}
+
 // —— 一键参悟：把行囊中所有秘籍逐一学会。已会的武学（与单本参悟一致）保留在行囊，不丢弃。——
 export function learnAllSkills() {
     const player = state.player;
