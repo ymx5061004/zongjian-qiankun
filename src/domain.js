@@ -3,7 +3,7 @@
 // 可单独测试。输入参数、输出结果，由控制层(actions)负责落地到 state/界面。
 // ============================================================
 import {
-    ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE
+    ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS
 } from './config.js';
 
 // —— 境界名 ——
@@ -150,6 +150,45 @@ export function generateItemByMatrix(levelFact) {
     };
 }
 
+// —— 品阶(成色)掷骰：按 BALANCE.qualityRoll 从高到低命中，余数为 0(凡品)。打造/黑市进货共用。——
+export function rollQuality() {
+    const r = Math.random() * 100;
+    for (const t of BALANCE.qualityRoll) if (r > t.min) return t.q;
+    return 0;
+}
+
+// —— 命名套装阶梯：按「档(tier)+部位(slot)」确定属性打造一件装备（梅尔沃式循序渐进的核心）。——
+// 属性 = 部位基础 × 档倍率(GEAR_TIERS.power) × 成色(quality 微调)。产出结构与随机装备完全一致(多带 tier 字段)，
+// 故背包/穿戴/洪炉/熔炼/tooltip 全部沿用、无需改。强化(item.enhance)再在档内放大攻防血。
+export function makeGearPiece(tier, slot, quality = 0) {
+    const T = GEAR_TIERS[tier - 1];
+    const names = MATRIX_ITEMS[slot];
+    if (!T || !names) return null;
+    const p = T.power * (1 + quality * BALANCE.gear.qualityStep);
+    let atk = 0, def = 0, hp = 0, crit = 0, dodge = 0;
+    switch (slot) {
+        case "weapon":    atk = Math.floor(22 * p); if (tier >= 3) crit = tier * 2; break;
+        case "subweapon": atk = Math.floor(12 * p); if (tier >= 3) crit = Math.floor(tier * 2.5); break;
+        case "armor":     def = Math.floor(10 * p); hp = Math.floor(50 * p); break;
+        case "helm":      def = Math.floor(6 * p);  hp = Math.floor(40 * p); break;
+        case "ring":      hp = Math.floor(80 * p);  if (tier >= 3) dodge = Math.min(75, Math.floor(tier * 1.2)); break;
+        case "artifact":  atk = Math.floor(10 * p); def = Math.floor(6 * p); hp = Math.floor(60 * p); if (tier >= 4) { crit = tier; dodge = tier; } break;
+        default: return null;
+    }
+    return {
+        id: "it_" + Date.now() + Math.random(),
+        name: `${T.name}·${names[Math.floor(Math.random() * names.length)]}`,
+        type: slot, tier, quality, atk, def, hp, crit, dodge,
+        price: Math.floor(BALANCE.itemPrice.base * Math.pow(BALANCE.itemPrice.growth, quality))
+    };
+}
+
+// 打造「一件」装备的花费（按档）。返回 {ingotKey, ingotQty, coin} 或 null。
+export function gearCraftCost(tier) {
+    const T = GEAR_TIERS[tier - 1];
+    return T ? { ingotKey: T.ingot, ingotQty: T.ingotQty, coin: T.coin } : null;
+}
+
 // —— 随机秘籍生成（价格随境界）——
 export function generateSkillByMatrix(realmLevel) {
     const suff = SKILL_SUFFIXES[Math.floor(Math.random() * SKILL_SUFFIXES.length)];
@@ -221,6 +260,21 @@ export function computeForgeResult(i1, i2, realmLevel, cost) {
 
     // 1) 装备 + 装备
     if (i1.type !== 'book' && i2.type !== 'book') {
+        // 打造套装件(带 tier)走「升级合成」：同档有概率升一档、否则取较高档；属性按 tier 重算，绝不退化成随机装。
+        // 任一为旧随机装/掉落装(无 tier)则落到下方原「品阶升阶」逻辑，保持向下兼容。
+        if (i1.tier && i2.tier) {
+            const targetType = Math.random() < 0.5 ? i1.type : i2.type;
+            const sameTier = i1.tier === i2.tier;
+            const upTier = sameTier && i1.tier < GEAR_TIERS.length && Math.random() < F.upgradeSameQ;
+            const newTier = upTier ? i1.tier + 1 : Math.max(i1.tier, i2.tier);
+            const baseQ = Math.max(i1.quality || 0, i2.quality || 0);
+            const newQ = (Math.random() < (sameTier ? F.upgradeSameQ : F.upgradeDiffQ)) ? Math.min(5, baseQ + 1) : baseQ;
+            const piece = makeGearPiece(newTier, targetType, newQ);
+            if (upTier) piece.name = "灵铸·" + piece.name;          // 升档标记
+            piece.price = Math.floor(cost * F.resultPriceMult);
+            return piece;
+        }
+
         const baseQ = Math.max(i1.quality, i2.quality);
         const upgradeChance = (i1.quality === i2.quality) ? F.upgradeSameQ : F.upgradeDiffQ;
         const finalQ = (Math.random() < upgradeChance) ? Math.min(5, baseQ + 1) : baseQ;

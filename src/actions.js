@@ -3,12 +3,12 @@
 // 粘合起来。校验、扣费、改 state、刷新界面、存档都在这里发生。
 // ============================================================
 import { state } from './state.js';
-import { BALANCE, MATERIALS } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost } from './domain.js';
+import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES } from './config.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
-    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance
+    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft
 } from './ui/render.js';
 import { saveGame } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -274,6 +274,36 @@ export async function useBagItem(idx) {
         updatePlayerAttributes();
         saveGame();
     }
+}
+
+// —— 打造图谱：按「档(tier)+部位」确定性打造一件命名套装件进背包（梅尔沃式爬阶梯的核心）。
+//    门控=锻造等级；耗对应档位的锭+碎银；成色(品阶)随机微调。装备主来源之一(前/中期)。——
+export function craftGear(tier, slot) {
+    const player = state.player;
+    const T = GEAR_TIERS[tier - 1];
+    if (!T) return;
+    const smLv = levelFromExp(player.professions.smithing.exp);
+    if (smLv < T.smithingReq) { toast(`需【锻造】${T.smithingReq} 级才能打造 ${T.name} 装备。`, 'error'); return; }
+    if (player.bag.length >= player.bagMax) { toast("行囊已满，先腾出空间。", 'error'); return; }
+    const cost = gearCraftCost(tier);
+    const have = player.materials[cost.ingotKey] || 0;
+    const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
+    if (have < cost.ingotQty) { toast(`${matName}不足：需 ${cost.ingotQty}，现有 ${have}。`, 'error'); return; }
+    if (player.coin < cost.coin) { toast(`碎银不足：打造需 ${cost.coin} 文。`, 'error'); return; }
+
+    player.materials[cost.ingotKey] -= cost.ingotQty;
+    if (player.materials[cost.ingotKey] <= 0) delete player.materials[cost.ingotKey];
+    player.coin -= cost.coin;
+    const q = rollQuality();
+    const piece = makeGearPiece(tier, slot, q);
+    player.bag.push(piece);
+
+    hideTooltip();
+    renderCraft();
+    renderBag();
+    updatePlayerAttributes();
+    saveGame();
+    toast(`🛡️ 打造成功：【${piece.name}】（${QUALITY_NAMES[q]}成色）！`, 'success');
 }
 
 // —— 神兵强化：用锭+碎银把「已装备」的装备 +1（永久放大攻/防/血）。

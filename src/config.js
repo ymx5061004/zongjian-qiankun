@@ -139,6 +139,11 @@ export const BALANCE = {
         levelsPerTier: 3,          // 每 3 级跨一档锭(越高级强化越吃高级锭 → 逼着往深矿挖)
         coinPerLevel: 400,         // 单次碎银 = 目标级 * 400 * (品阶+1)
         ingotTiers: ['ingot_copper', 'ingot_iron', 'ingot_xuan', 'ingot_cold', 'ingot_star', 'ingot_jade']
+    },
+
+    // —— 装备成色（随机品阶退居为锻造的小幅波动；tier 才是强度主轴）——
+    gear: {
+        qualityStep: 0.06          // 成色每级 +6% 属性(凡品0 → 神话+30%)，保留配色/熔炼价值但不越档
     }
 };
 
@@ -189,6 +194,23 @@ export const ACTIVITIES = [
     { id: "smelt_star",   prof: "smithing", tier: 5, name: "熔炼星陨锭", levelReq: 60, durationMs: 4500, exp: 85,  inputs: { ore_star: 2 },   outputs: { ingot_star: 1 } },
     { id: "smelt_jade",   prof: "smithing", tier: 6, name: "熔炼玄晶锭", levelReq: 80, durationMs: 5000, exp: 128, inputs: { ore_jade: 2 },   outputs: { ingot_jade: 1 } },
     // 注：锭不再用来「打造随机装备」(那与黑市/战斗爆装重复、毫无意义)。
-    // 锭的唯一出口 = 强化已装备的神兵(见 BALANCE.enhance 与 actions.enhanceEquip)——黑市买不到、战斗爆不出的垂直变强轴。
+    // 锭的两大出口 = ①打造命名套装(GEAR_TIERS + actions.craftGear) ②强化已装备的神兵(BALANCE.enhance + actions.enhanceEquip)。
+    // 二者共享锭产能，需平衡(数值待试玩调)。黑市买不到、战斗爆不出的垂直变强轴=自己挖矿熔炼。
     // (通用引擎仍支持 craftItem 类动作，暂未启用，保留备用。)
+];
+
+// ============================================================
+// 装备「命名套装阶梯」（梅尔沃式循序渐进的脊梁）：
+// 装备强度的主轴 = tier(档)，对应矿石/锭层级；按采矿+锻造等级解锁，确定属性、靠打造获得。
+// 随机品阶(quality 0~5)退居为「锻造成色」——同档装备打出来的 ±小幅波动(见 BALANCE.gear.qualityStep)，不再是越级强度来源。
+// 强化(+N)在档内微调。换档=大跨步，强化=细打磨——两根轴。
+// ingot/ingotQty/coin：打造「一件」的花费；power：该档相对 1 档的属性倍率。
+// ============================================================
+export const GEAR_TIERS = [
+    { tier: 1, name: "凡铁", smithingReq: 1,  ingot: "ingot_copper", ingotQty: 4, power: 1.0,  coin: 200 },
+    { tier: 2, name: "精铁", smithingReq: 12, ingot: "ingot_iron",   ingotQty: 4, power: 2.0,  coin: 700 },
+    { tier: 3, name: "玄铁", smithingReq: 25, ingot: "ingot_xuan",   ingotQty: 5, power: 3.8,  coin: 2000 },
+    { tier: 4, name: "寒铁", smithingReq: 40, ingot: "ingot_cold",   ingotQty: 5, power: 7.0,  coin: 5500 },
+    { tier: 5, name: "星陨", smithingReq: 60, ingot: "ingot_star",   ingotQty: 6, power: 13.0, coin: 15000 },
+    { tier: 6, name: "玄晶", smithingReq: 80, ingot: "ingot_jade",   ingotQty: 6, power: 24.0, coin: 42000 }
 ];

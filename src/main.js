@@ -10,7 +10,7 @@ import {
     initTooltipEvent, hideTooltip, switchPage,
     updatePlayerAttributes, renderForge, renderBag,
     renderMapList, renderPlayerSkills, rollShopGoods,
-    renderProduction, renderWarehouse,
+    renderProduction, renderWarehouse, selectCraftTier,
     toggleMenu, closeMenu
 } from './ui/render.js';
 import { startHangup, stopHangup } from './ui/battle.js';
@@ -21,7 +21,7 @@ import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
-    enhanceEquip
+    enhanceEquip, craftGear
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -104,6 +104,8 @@ function onDelegatedClick(e) {
         case 'reborn': triggerReborn(); break;
         case 'unequip': unequip(el.dataset.slot); break;
         case 'enhance-equip': enhanceEquip(el.dataset.slot); break;
+        case 'craft-gear': craftGear(Number(el.dataset.tier), el.dataset.slot); break;
+        case 'select-craft-tier': selectCraftTier(Number(el.dataset.tier)); break;
         case 'stop-hangup': stopHangup(); break;
         case 'hangup': stopActivity(); startHangup(Number(el.dataset.map)); break;   // 开战前先停生产（二者互斥）
         case 'start-activity': stopHangup(); startActivity(el.dataset.id); break;     // 开工前先停战斗

@@ -3,10 +3,14 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost } from '../domain.js';
+import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality } from '../domain.js';
 import { formatNumber } from '../util.js';
+
+// 装备 6 部位键与中文名（打造/强化/黑市/对比共用）
+const GEAR_SLOT_KEYS = ['weapon', 'subweapon', 'armor', 'helm', 'ring', 'artifact'];
+const GEAR_SLOT_LABEL = { weapon: '兵刃', subweapon: '暗器', armor: '防具', helm: '头盔', ring: '配饰', artifact: '法宝' };
 
 // ---------- 浮动提示 tooltip ----------
 export function hideTooltip() {
@@ -39,7 +43,8 @@ function generateHtmlColumn(info, titlePrefix = "", isCurrentlyEquipped = false)
         const enh = info.enhance || 0;
         const em = 1 + enh * BALANCE.enhance.perLevel;
         html += `<div class="tooltip-title" style="color:${qColor}">${titlePrefix}${info.name}${enh ? ` <span style="color:var(--color-gold)">+${enh}</span>` : ''}</div>`;
-        html += `<div class="tooltip-attr"><span>品阶质量:</span><span style="color:${qColor}">${QUALITY_NAMES[info.quality || 0] || '未知'}</span></div>`;
+        html += `<div class="tooltip-attr"><span>品阶质量:</span><span style="color:${qColor}">${QUALITY_NAMES[info.quality || 0] || '未知'} 成色</span></div>`;
+        if (info.tier && GEAR_TIERS[info.tier - 1]) html += `<div class="tooltip-attr"><span>套装档:</span><span style="color:var(--color-blue)">T${info.tier}·${GEAR_TIERS[info.tier - 1].name}</span></div>`;
         if (enh) html += `<div class="tooltip-attr"><span>强化等级:</span><span style="color:var(--color-gold)">+${enh}（攻防血 ×${em.toFixed(2)}）</span></div>`;
         html += `<div class="tooltip-attr"><span>回收碎银:</span><span style="color:var(--color-gold)">${info.price} 文</span></div>`;
         html += `<hr style="border:0; border-top:1px dashed #222; margin:6px 0;">`;
@@ -314,7 +319,13 @@ export function rollShopGoods() {
         } });
     }
     const skillCount = shopGoods.length ? 2 : 3; // 出了孤本则普通货位 6→5（孤本占掉一个秘籍位）
-    for (let i = 0; i < 3; i++) shopGoods.push({ kind: 'item', obj: generateItemByMatrix(player.realmLevel) });
+    // 黑市只卖「凡铁/精铁」低档基础套装件(前期启动用)——不再卖随机高档装、刷新也刷不出顶配，
+    // 杜绝「刷钱→刷新→买顶装」。中后期装备靠自己打造/掉落(见打造图谱与后续掉落改造)。
+    for (let i = 0; i < 3; i++) {
+        const lowTier = 1 + Math.floor(Math.random() * 2); // 1=凡铁 / 2=精铁
+        const slot = GEAR_SLOT_KEYS[Math.floor(Math.random() * GEAR_SLOT_KEYS.length)];
+        shopGoods.push({ kind: 'item', obj: makeGearPiece(lowTier, slot, rollQuality()) });
+    }
     for (let i = 0; i < skillCount; i++) {
         // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/...），仅覆盖售价为固定 6000。
         const sk = generateSkillByMatrix(player.realmLevel);
@@ -560,6 +571,49 @@ export function renderEnhance() {
     }
 }
 
+// ---------- 打造图谱页（按档×部位确定性打造命名套装；档由采矿/锻造等级解锁）----------
+let selectedCraftTier = 0; // 0=未选(首次打开自动落到已解锁最高档)
+export function selectCraftTier(tier) { selectedCraftTier = tier; renderCraft(); }
+
+export function renderCraft() {
+    const player = state.player;
+    const tabs = document.getElementById('craft-tier-tabs');
+    const box = document.getElementById('craft-slots');
+    if (!tabs || !box) return;
+    const smLv = levelFromExp(player.professions.smithing.exp);
+    const maxUnlocked = GEAR_TIERS.filter(T => smLv >= T.smithingReq).length; // 恒 ≥1(凡铁锻造1)
+    // 选中档越界(首次未选/超出已解锁/手选档被锁) → 落到已解锁最高档；玩家手选的合法档则保留
+    if (selectedCraftTier < 1 || selectedCraftTier > maxUnlocked) selectedCraftTier = maxUnlocked;
+
+    tabs.innerHTML = GEAR_TIERS.map(T => {
+        const locked = smLv < T.smithingReq;
+        return `<button class="craft-tab ${T.tier === selectedCraftTier ? 'active' : ''}" ${locked ? 'disabled' : ''} data-act="select-craft-tier" data-tier="${T.tier}">${locked ? '🔒' : ''}${T.name}${locked ? `·锻${T.smithingReq}` : ''}</button>`;
+    }).join('');
+
+    const T = GEAR_TIERS[selectedCraftTier - 1];
+    if (smLv < T.smithingReq) {
+        box.innerHTML = `<div class="wh-empty">需【锻造】${T.smithingReq} 级才能打造 ${T.name} 套装。<br>去「采矿」挖矿、「锻造」熔炼把锻造练上去。</div>`;
+        return;
+    }
+    const cost = gearCraftCost(selectedCraftTier);
+    const have = player.materials[cost.ingotKey] || 0;
+    const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
+    const setLine = `<div class="prof-exp-text" style="margin-bottom:10px;">完整 ${T.name} 套装(6 件)：耗 ${matName}×${cost.ingotQty * 6} + 碎银 ${formatNumber(cost.coin * 6)}（强化另计）</div>`;
+    box.innerHTML = setLine + GEAR_SLOT_KEYS.map(slot => {
+        const pv = makeGearPiece(selectedCraftTier, slot, 0); // 预览(凡品成色)属性
+        const statStr = ['atk', 'def', 'hp', 'crit', 'dodge'].filter(k => pv[k])
+            .map(k => `${({ atk: '攻', def: '防', hp: '血', crit: '暴', dodge: '闪' })[k]} ${pv[k]}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('　');
+        const okMat = have >= cost.ingotQty, okCoin = player.coin >= cost.coin, okBag = player.bag.length < player.bagMax;
+        const matCol = okMat ? 'var(--color-success)' : 'var(--color-accent)';
+        const coinCol = okCoin ? 'var(--color-gold)' : 'var(--color-accent)';
+        return `<div class="act-card">
+            <div class="act-head"><span class="act-title">${T.name}·${GEAR_SLOT_LABEL[slot]}</span>
+                <button class="btn btn-success" data-act="craft-gear" data-tier="${selectedCraftTier}" data-slot="${slot}" ${okMat && okCoin && okBag ? '' : 'disabled'}>🛡 打造</button></div>
+            <div class="act-meta">${statStr}<br>耗 <span style="color:${matCol}">${matName}×${cost.ingotQty}(有${formatNumber(have)})</span> · <span style="color:${coinCol}">碎银 ${formatNumber(cost.coin)}</span>${okBag ? '' : ' · <span style="color:var(--color-accent)">行囊已满</span>'} · 成色随机</div>
+        </div>`;
+    }).join('');
+}
+
 // ---------- 左侧菜单抽屉开关（仅移动端 ≤768 生效：桌面侧栏常驻、无 .open 类，调用无副作用）----------
 export function toggleMenu() {
     const sb = document.getElementById('nav-sidebar');
@@ -588,6 +642,7 @@ export function switchPage(pageId, tabEl) {
     if (pageId === 'guide') renderGuide();
     if (pageId === 'mining' || pageId === 'smithing') { renderProduction(); renderWarehouse(); }
     if (pageId === 'enhance') renderEnhance();
+    if (pageId === 'craft') renderCraft();
 }
 
 // ---------- 江湖秘典：游戏全机制说明（只读静态页）----------

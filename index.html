@@ -48,6 +48,7 @@
                 <div class="menu-items">
                     <button class="menu-item" data-act="switch-page" data-page="mining"><span class="menu-icon">⛏️</span>采矿</button>
                     <button class="menu-item" data-act="switch-page" data-page="smithing"><span class="menu-icon">🔨</span>锻造</button>
+                    <button class="menu-item" data-act="switch-page" data-page="craft"><span class="menu-icon">🛡️</span>打造</button>
                     <button class="menu-item" data-act="switch-page" data-page="enhance"><span class="menu-icon">⚒️</span>强化</button>
                 </div>
             </div>
@@ -236,6 +237,14 @@
             <div class="sub-panel">
                 <div class="panel-title">📦 物料仓库</div>
                 <div class="scroll-box" id="warehouse-smithing"></div>
+            </div>
+        </div>
+
+        <div id="page-craft" class="page">
+            <div class="sub-panel" style="grid-column: span 2;">
+                <div class="panel-title">🛡️ 打造图谱 <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">（按档打造确定属性的命名套装；档由锻造等级解锁，强化在档内微调）</span></div>
+                <div id="craft-tier-tabs" class="craft-tabs"></div>
+                <div class="scroll-box" id="craft-slots"></div>
             </div>
         </div>
 
