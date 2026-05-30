@@ -3,11 +3,13 @@
 // 并处理挂机循环。逻辑（伤害/胜负）在 domain，这里只负责"演"和落地奖励。
 // ============================================================
 import { state } from '../state.js';
-import { BALANCE, MAP_NAMES } from '../config.js';
+import { BALANCE, MAP_NAMES, GEAR_TIERS, MATERIALS } from '../config.js';
 import { formatNumber } from '../util.js';
-import { finalizeEnemyStats, simulateBattle, generateItemByMatrix } from '../domain.js';
+import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality } from '../domain.js';
 import { renderBag, renderMapList, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
+
+const BATTLE_SLOT_KEYS = ['weapon', 'subweapon', 'armor', 'helm', 'ring', 'artifact'];
 
 // 敌人火柴人 SVG（与原版一致）
 const ENEMY_SVG = `
@@ -133,12 +135,19 @@ function executeLoopBattle(mapId) {
         player.coin += coinG;
         player.exp += expG;
 
-        let bonus = "";
-        const finalDrop = BALANCE.reward.baseDrop * (stats.dropRate / 100);
-        if (Math.random() < finalDrop && player.bag.length < player.bagMax) {
-            const newItem = generateItemByMatrix(mapId);
+        // —— 材料导向掉落 —— 每场胜利必掉「该区域档位」的矿石(喂打造/熔炼)，把战斗接进生产经济
+        const regionTier = mapTier(mapId);
+        const oreKey = GEAR_TIERS[regionTier - 1].ore;
+        const oreQty = 1 + Math.floor(Math.random() * BALANCE.reward.oreDropMax);
+        player.materials[oreKey] = (player.materials[oreKey] || 0) + oreQty;
+        let bonus = ` 拾得 ${MATERIALS[oreKey].name}×${oreQty}`;
+
+        // 低概率额外掉「该区域档位」的装备(成色随机)——锦上添花，不再是越级随机神装(顶配仍需自己打造/后期副本)
+        const gearChance = BALANCE.reward.baseDrop * (stats.dropRate / 100);
+        if (Math.random() < gearChance && player.bag.length < player.bagMax) {
+            const newItem = makeGearPiece(regionTier, BATTLE_SLOT_KEYS[Math.floor(Math.random() * BATTLE_SLOT_KEYS.length)], rollQuality());
             player.bag.push(newItem);
-            bonus = ` 夺得战利品: [${newItem.name}]`;
+            bonus += `，夺得 [${newItem.name}]`;
             // 拖拽进行中不重渲背包：否则会销毁正被拖动的源节点、触发 pointercancel 中止拖拽。
             // 掉落物 push 在数组末尾不影响正在拖的索引；拖拽结束(落子或取消)会补刷背包。
             if (!isDragging()) renderBag();

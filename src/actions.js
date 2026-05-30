@@ -3,15 +3,16 @@
 // 粘合起来。校验、扣费、改 state、刷新界面、存档都在这里发生。
 // ============================================================
 import { state } from './state.js';
-import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality } from './domain.js';
+import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES } from './config.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
-    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft
+    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse
 } from './ui/render.js';
 import { saveGame } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
+import { formatNumber } from './util.js';
 
 // —— 破境冲关 ——
 export function playerBreakthrough() {
@@ -274,6 +275,71 @@ export async function useBagItem(idx) {
         updatePlayerAttributes();
         saveGame();
     }
+}
+
+// —— 出售物料：把整堆某物料按单价换成碎银（前期富余的低档矿石的去处；碎银喂打造/突破/强化/进阶）。
+//    卖前二次确认，避免误点把一大堆值钱的矿/锭瞬间清空。——
+export async function sellMaterial(key) {
+    const player = state.player;
+    const mat = MATERIALS[key];
+    const shownQty = player.materials[key] || 0;
+    if (!mat || shownQty <= 0) return;
+    if (!mat.price) { toast(`${mat.name}无法出售。`, 'error'); return; }
+    const ok = await confirmDialog(`确定出售全部【${mat.name}】×${formatNumber(shownQty)}，换取碎银 ${formatNumber(shownQty * mat.price)} 文吗？`);
+    if (!ok) return;
+    const qty = player.materials[key] || 0; // 异步确认期间挂机可能又采了几个，按当前实际数结算
+    if (qty <= 0) return;
+    const gain = qty * mat.price;
+    delete player.materials[key];
+    player.coin += gain;
+    renderWarehouse();
+    updatePlayerAttributes();
+    saveGame();
+    toast(`出售【${mat.name}】×${formatNumber(qty)}，得碎银 ${formatNumber(gain)} 文。`, 'success');
+}
+
+// —— 秘境：挑战 Boss（即时结算一场战斗，真打死才算胜）。胜则掉神魂结晶+碎银，可反复刷。——
+export function challengeBoss(bossId) {
+    const player = state.player;
+    const boss = BOSSES.find(b => b.id === bossId);
+    if (!boss) return;
+    if (player.realmLevel < boss.realmReq) { toast(`境界不足，挑战【${boss.name}】需 ${getRealmName(boss.realmReq)}。`, 'error'); return; }
+    const stats = computeStats(player).stats;
+    const { enemyDead } = simulateBattle(stats, finalizeBossStats(boss), player.skills);
+    if (!enemyDead) { toast(`不敌【${boss.name}】！再砥砺战力(强化/进阶/轮回)后来战。`, 'error'); return; }
+    const crystal = boss.crystalMin + Math.floor(Math.random() * (boss.crystalMax - boss.crystalMin + 1));
+    player.materials.soul_crystal = (player.materials.soul_crystal || 0) + crystal;
+    player.coin += boss.coin;
+    renderDungeon();
+    updatePlayerAttributes();
+    saveGame();
+    toast(`⚔️ 击败【${boss.name}】！获得 神魂结晶×${crystal}、碎银+${formatNumber(boss.coin)}。`, 'success');
+}
+
+// —— 神兵进阶：用神魂结晶+碎银把「已装备」的玄晶档(或神话档)装备突破到下一档(打造造不出的档)。保留成色与强化等级。——
+export function upgradeGear(slot) {
+    const player = state.player;
+    const item = player.equips[slot];
+    if (!item) { toast("该部位未装备，无法进阶。", 'error'); return; }
+    const cost = gearUpgradeCost(item);
+    if (!cost) { toast("该装备无法进阶（需先打造/合成到玄晶档，且未达顶档）。", 'error'); return; }
+    const haveCry = player.materials.soul_crystal || 0;
+    if (haveCry < cost.crystal) { toast(`神魂结晶不足：需 ${cost.crystal}，现有 ${haveCry}。去秘境击败 Boss 获取。`, 'error'); return; }
+    if (player.coin < cost.coin) { toast(`碎银不足：进阶需 ${cost.coin} 文。`, 'error'); return; }
+
+    player.materials.soul_crystal -= cost.crystal;
+    if (player.materials.soul_crystal <= 0) delete player.materials.soul_crystal;
+    player.coin -= cost.coin;
+    const upgraded = makeGearPiece(cost.nextTier, slot, item.quality || 0);
+    upgraded.enhance = item.enhance || 0;   // 保留强化投入，跨档不打水漂
+    const oldName = item.name;
+    player.equips[slot] = upgraded;
+
+    hideTooltip();
+    renderDungeon();
+    updatePlayerAttributes();
+    saveGame();
+    toast(`✨ 神兵进阶！【${oldName}】→【${upgraded.name}】（${GEAR_TIERS[cost.nextTier - 1].name}档）。`, 'success');
 }
 
 // —— 打造图谱：按「档(tier)+部位」确定性打造一件命名套装件进背包（梅尔沃式爬阶梯的核心）。

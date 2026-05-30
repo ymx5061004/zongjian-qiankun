@@ -3,9 +3,9 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor } from '../domain.js';
 import { formatNumber } from '../util.js';
 
 // 装备 6 部位键与中文名（打造/强化/黑市/对比共用）
@@ -290,7 +290,8 @@ export function renderMapList() {
         const card = document.createElement('div');
         card.className = `list-card`;
         if (!isUnlocked) card.style.opacity = "0.3";
-        card.innerHTML = `<div><strong>关卡 ${i}：${MAP_NAMES[i - 1] || `神秘禁区`}</strong> ${!isUnlocked ? '🔒' : ''}<br><small style="color:var(--text-muted)">准入: ${getRealmName(reqLevel)}</small></div><button class="btn" ${isUnlocked ? '' : 'disabled'} data-act="hangup" data-map="${i}">${player.currentMapId === i ? '历练中' : '挑战'}</button>`;
+        const recTier = GEAR_TIERS[mapTier(i) - 1];
+        card.innerHTML = `<div><strong>关卡 ${i}：${MAP_NAMES[i - 1] || `神秘禁区`}</strong> ${!isUnlocked ? '🔒' : ''}<br><small style="color:var(--text-muted)">准入: ${getRealmName(reqLevel)} · 推荐 <span style="color:var(--color-blue)">${recTier.name}套</span> · 掉 ${recTier.name}矿</small></div><button class="btn" ${isUnlocked ? '' : 'disabled'} data-act="hangup" data-map="${i}">${player.currentMapId === i ? '历练中' : '挑战'}</button>`;
         box.appendChild(card);
     }
 }
@@ -465,7 +466,8 @@ function activityCardHtml(act, player) {
     const outParts = [];
     if (act.outputs) for (const [k, n] of Object.entries(act.outputs)) outParts.push(`${matName(k)}×${n}`);
     if (act.craftItem) outParts.push('随机神兵→行囊');
-    const meta = [`产出 ${outParts.join('、')}`, `经验+${act.exp}`, `${(act.durationMs / 1000).toFixed(1)}秒`];
+    const effDur = effDurationMs(act.durationMs, lv);
+    const meta = [`产出 ${outParts.join('、')}`, `经验+${act.exp}`, `${(effDur / 1000).toFixed(1)}秒`];
     if (act.inputs) {
         const inParts = Object.entries(act.inputs).map(([k, n]) => `${matName(k)}×${n}`);
         meta.push(`消耗 ${inParts.join('、')}`);
@@ -480,7 +482,7 @@ function activityCardHtml(act, player) {
     return `<div class="act-card ${locked ? 'locked' : ''} ${running ? 'running' : ''}">
         <div class="act-head"><span class="act-title">${ico} ${act.name}</span>${btn}</div>
         <div class="act-meta">${meta.join(' · ')}</div>
-        <div class="act-progress"><i style="animation-duration:${act.durationMs}ms"></i></div>
+        <div class="act-progress"><i style="animation-duration:${effDur}ms"></i></div>
     </div>`;
 }
 
@@ -498,7 +500,12 @@ export function renderProduction() {
         const bar = document.getElementById(`${prof}-exp-bar`);
         if (bar) bar.style.width = (lv >= maxLv ? 100 : Math.floor(((exp - cur) / (next - cur)) * 100)) + '%';
         const expTxt = document.getElementById(`${prof}-exp-text`);
-        if (expTxt) expTxt.innerText = lv >= maxLv ? '已臻化境（满级）' : `修为 ${formatNumber(exp - cur)} / ${formatNumber(next - cur)}`;
+        if (expTxt) {
+            const spd = Math.round((1 - idleSpeedFactor(lv)) * 100);
+            const yld = Math.round(bonusYieldChance(lv) * 100);
+            const base = lv >= maxLv ? '已臻化境（满级）' : `修为 ${formatNumber(exp - cur)} / ${formatNumber(next - cur)}`;
+            expTxt.innerText = `${base} · 提速 ${spd}% · 双倍产出 ${yld}%`;
+        }
         const list = document.getElementById(`${prof}-list`);
         if (list) list.innerHTML = ACTIVITIES.filter(a => a.prof === prof).map(a => activityCardHtml(a, player)).join('');
     });
@@ -509,9 +516,11 @@ export function renderWarehouse() {
     const player = state.player;
     const keys = Object.keys(MATERIALS).filter(k => (player.materials[k] || 0) > 0);
     const html = keys.length
-        ? `<div class="wh-grid">` + keys.map(k =>
-            `<div class="wh-item"><div class="wh-ico">${MATERIALS[k].icon}</div>${MATERIALS[k].name}<br><span class="wh-qty">${formatNumber(player.materials[k])}</span></div>`
-        ).join('') + `</div>`
+        ? `<div class="wh-grid">` + keys.map(k => {
+            const qty = player.materials[k], price = MATERIALS[k].price || 0;
+            const sell = price > 0 ? `<button class="btn wh-sell" data-act="sell-material" data-key="${k}">卖 ${formatNumber(qty * price)}文</button>` : '';
+            return `<div class="wh-item"><div class="wh-ico">${MATERIALS[k].icon}</div>${MATERIALS[k].name}<br><span class="wh-qty">${formatNumber(qty)}</span>${sell}</div>`;
+        }).join('') + `</div>`
         : `<div class="wh-empty">— 仓库空空如也，去采矿 / 熔炼积攒物料吧 —</div>`;
     ['warehouse-mining', 'warehouse-smithing'].forEach(id => {
         const box = document.getElementById(id);
@@ -585,7 +594,8 @@ export function renderCraft() {
     // 选中档越界(首次未选/超出已解锁/手选档被锁) → 落到已解锁最高档；玩家手选的合法档则保留
     if (selectedCraftTier < 1 || selectedCraftTier > maxUnlocked) selectedCraftTier = maxUnlocked;
 
-    tabs.innerHTML = GEAR_TIERS.map(T => {
+    // 仅列「可锻造」档(T7/T8 神话/仙器打造造不出，只能秘境进阶)
+    tabs.innerHTML = GEAR_TIERS.filter(T => T.craftable !== false).map(T => {
         const locked = smLv < T.smithingReq;
         return `<button class="craft-tab ${T.tier === selectedCraftTier ? 'active' : ''}" ${locked ? 'disabled' : ''} data-act="select-craft-tier" data-tier="${T.tier}">${locked ? '🔒' : ''}${T.name}${locked ? `·锻${T.smithingReq}` : ''}</button>`;
     }).join('');
@@ -612,6 +622,48 @@ export function renderCraft() {
             <div class="act-meta">${statStr}<br>耗 <span style="color:${matCol}">${matName}×${cost.ingotQty}(有${formatNumber(have)})</span> · <span style="color:${coinCol}">碎银 ${formatNumber(cost.coin)}</span>${okBag ? '' : ' · <span style="color:var(--color-accent)">行囊已满</span>'} · 成色随机</div>
         </div>`;
     }).join('');
+}
+
+// ---------- 秘境页（Boss 挑战 + 神兵进阶）----------
+export function renderDungeon() {
+    const player = state.player;
+    // Boss 列表
+    const bossBox = document.getElementById('boss-list');
+    if (bossBox) {
+        bossBox.innerHTML = BOSSES.map(b => {
+            const locked = player.realmLevel < b.realmReq;
+            return `<div class="act-card ${locked ? 'locked' : ''}">
+                <div class="act-head"><span class="act-title">👹 ${b.name}</span>
+                    <button class="btn btn-danger" data-act="challenge-boss" data-boss="${b.id}" ${locked ? 'disabled' : ''}>${locked ? '🔒 ' + getRealmName(b.realmReq) : '挑战'}</button></div>
+                <div class="act-meta">掉落 💎神魂结晶×${b.crystalMin}~${b.crystalMax} · 碎银 ${formatNumber(b.coin)}${locked ? ` · 需 ${getRealmName(b.realmReq)}` : ''}</div>
+            </div>`;
+        }).join('');
+    }
+    // 神兵进阶（6 装备槽）+ 神魂结晶持有量
+    const upBox = document.getElementById('upgrade-slots');
+    if (upBox) {
+        const cry = player.materials.soul_crystal || 0;
+        const head = `<div class="prof-exp-text" style="margin-bottom:10px;">持有 💎神魂结晶 ×${cry}。进阶把 ${GEAR_TIERS[MAX_CRAFTABLE_TIER - 1].name}档 装备突破到 神话→仙器（打造造不出的档），保留成色与强化。</div>`;
+        upBox.innerHTML = head + ENHANCE_SLOTS.map(([slot, label]) => {
+            const it = player.equips[slot];
+            if (!it) return `<div class="act-card locked"><div class="act-head"><span class="act-title">【${label}】</span><span style="color:var(--text-muted);font-size:12px;">— 未装备 —</span></div></div>`;
+            const tierName = (it.tier && GEAR_TIERS[it.tier - 1]) ? GEAR_TIERS[it.tier - 1].name : '杂项';
+            const cost = gearUpgradeCost(it);
+            const qC = QUALITY_COLORS[it.quality || 0] || '#7f8c8d';
+            let btn, note;
+            if (!cost) {
+                btn = `<button class="btn" disabled>不可进阶</button>`;
+                note = (it.tier >= GEAR_TIERS.length) ? '已达顶档（仙器）' : `需先到 ${GEAR_TIERS[MAX_CRAFTABLE_TIER - 1].name}档`;
+            } else {
+                const okCry = cry >= cost.crystal, okCoin = player.coin >= cost.coin;
+                const cryCol = okCry ? 'var(--color-success)' : 'var(--color-accent)';
+                const coinCol = okCoin ? 'var(--color-gold)' : 'var(--color-accent)';
+                note = `进阶→${GEAR_TIERS[cost.nextTier - 1].name}：<span style="color:${cryCol}">💎×${cost.crystal}(有${cry})</span> · <span style="color:${coinCol}">碎银 ${formatNumber(cost.coin)}</span>`;
+                btn = `<button class="btn btn-success" data-act="upgrade-gear" data-slot="${slot}" ${okCry && okCoin ? '' : 'disabled'}>⬆ 进阶</button>`;
+            }
+            return `<div class="act-card"><div class="act-head"><span class="act-title" style="color:${qC}">【${label}】${it.name}${it.enhance ? ` +${it.enhance}` : ''}</span>${btn}</div><div class="act-meta">当前 ${tierName}档 · ${note}</div></div>`;
+        }).join('');
+    }
 }
 
 // ---------- 左侧菜单抽屉开关（仅移动端 ≤768 生效：桌面侧栏常驻、无 .open 类，调用无副作用）----------
@@ -643,6 +695,7 @@ export function switchPage(pageId, tabEl) {
     if (pageId === 'mining' || pageId === 'smithing') { renderProduction(); renderWarehouse(); }
     if (pageId === 'enhance') renderEnhance();
     if (pageId === 'craft') renderCraft();
+    if (pageId === 'dungeon') renderDungeon();
 }
 
 // ---------- 江湖秘典：游戏全机制说明（只读静态页）----------

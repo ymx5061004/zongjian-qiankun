@@ -28,6 +28,18 @@ export function levelFromExp(exp) {
     return lv;
 }
 
+// —— 生产效率（随技能等级提升）：练级本身=提效途径，不只是解锁高档 ——
+// 提速：等级越高单次读条越短(封顶)；增产：等级越高越大概率「本次产出翻倍」。
+export function idleSpeedFactor(level) {
+    return 1 - Math.min(BALANCE.idle.speedCap, BALANCE.idle.speedPerLevel * (level - 1));
+}
+export function effDurationMs(durationMs, level) {
+    return Math.max(500, Math.round(durationMs * idleSpeedFactor(level))); // 不低于 0.5s
+}
+export function bonusYieldChance(level) {
+    return Math.min(BALANCE.idle.yieldCap, BALANCE.idle.yieldPerLevel * (level - 1));
+}
+
 // —— 神兵强化下一级花费（纯函数）。返回 {targetLevel, ingotKey, ingotQty, coin}；已满级返回 null。——
 // 目标级越高 → 跨到越高级的锭(levelsPerTier 一档)，逼着玩家往深矿挖；碎银随目标级与品阶上扬。
 export function enhanceCost(item) {
@@ -106,7 +118,13 @@ export function computeStats(player) {
 
 // —— 关卡难度 / 敌人属性 ——
 export function getMapDifficulty(mapId) {
-    return Math.pow(2, mapId - 1); // 难度逐关翻倍
+    return Math.pow(BALANCE.enemy.diffBase, mapId - 1); // 难度逐关 ×diffBase（调缓后堆装备/强化能明显多推关卡）
+}
+
+// 关卡所属装备档(1~6)：100 关分 6 段(每段约 17 关)。用于"推荐装备档"里程碑与战斗掉落档位。
+// 封顶在「可锻造最高档」——区域只掉可锻造档的矿(T7/T8 神话/仙器无对应矿，仅秘境进阶产出)。
+export function mapTier(mapId) {
+    return Math.min(MAX_CRAFTABLE_TIER, Math.max(1, Math.ceil(mapId / 17)));
 }
 
 export function finalizeEnemyStats(mapId) {
@@ -117,6 +135,18 @@ export function finalizeEnemyStats(mapId) {
         maxHp: Math.floor(baseHp * diffMult),
         atk: Math.floor(baseAtk * diffMult),
         def: Math.floor(baseDef * diffMult)
+    };
+}
+
+// —— 秘境 Boss 属性：难度 = getMapDifficulty(mapEquiv) * toughness ——
+export function finalizeBossStats(boss) {
+    const diff = getMapDifficulty(boss.mapEquiv) * boss.toughness;
+    const { baseHp, baseAtk, baseDef } = BALANCE.enemy;
+    return {
+        name: boss.name,
+        maxHp: Math.floor(baseHp * diff),
+        atk: Math.floor(baseAtk * diff),
+        def: Math.floor(baseDef * diff)
     };
 }
 
@@ -189,6 +219,20 @@ export function gearCraftCost(tier) {
     return T ? { ingotKey: T.ingot, ingotQty: T.ingotQty, coin: T.coin } : null;
 }
 
+// 可锻造的最高档(craftable!==false 的数量)。打造/洪炉升档以此封顶，再往上只能靠神兵进阶。
+export const MAX_CRAFTABLE_TIER = GEAR_TIERS.filter(t => t.craftable !== false).length;
+
+// —— 神兵进阶花费：仅 T6/T7 档可进阶(T6→T7神话、T7→T8仙器；T8 已满顶，低于 T6 走打造)。吃神魂结晶+碎银。返回 {nextTier,crystal,coin} 或 null。——
+export function gearUpgradeCost(item) {
+    if (!item || !item.tier) return null;
+    if (item.tier < MAX_CRAFTABLE_TIER || item.tier >= GEAR_TIERS.length) return null;
+    const next = item.tier + 1;
+    const crystal = BALANCE.upgrade.crystalCost[next];
+    const coin = BALANCE.upgrade.coinCost[next];
+    if (crystal === undefined || coin === undefined) return null; // 配置缺该档花费 → 视为不可进阶，避免算出 NaN
+    return { nextTier: next, crystal, coin };
+}
+
 // —— 随机秘籍生成（价格随境界）——
 export function generateSkillByMatrix(realmLevel) {
     const suff = SKILL_SUFFIXES[Math.floor(Math.random() * SKILL_SUFFIXES.length)];
@@ -247,7 +291,8 @@ export function simulateBattle(stats, enemy, skills) {
         round++;
     }
 
-    return { win: pHp > 0, events };
+    // enemyDead：敌人是否真被打死(用于 Boss——撑满回合"存活"不算击杀)。win 沿用旧义(玩家存活)，地图挂机不变。
+    return { win: pHp > 0, enemyDead: eHp <= 0, events };
 }
 
 // —— 洪炉：花费 + 合成结果（纯计算，不扣钱、不动背包，交给控制层）——
@@ -265,7 +310,8 @@ export function computeForgeResult(i1, i2, realmLevel, cost) {
         if (i1.tier && i2.tier) {
             const targetType = Math.random() < 0.5 ? i1.type : i2.type;
             const sameTier = i1.tier === i2.tier;
-            const upTier = sameTier && i1.tier < GEAR_TIERS.length && Math.random() < F.upgradeSameQ;
+            // 洪炉升档封顶在「可锻造最高档(T6)」——突破到神话/仙器只能走神兵进阶(吃神魂结晶)
+            const upTier = sameTier && i1.tier < MAX_CRAFTABLE_TIER && Math.random() < F.upgradeSameQ;
             const newTier = upTier ? i1.tier + 1 : Math.max(i1.tier, i2.tier);
             const baseQ = Math.max(i1.quality || 0, i2.quality || 0);
             const newQ = (Math.random() < (sameTier ? F.upgradeSameQ : F.upgradeDiffQ)) ? Math.min(5, baseQ + 1) : baseQ;

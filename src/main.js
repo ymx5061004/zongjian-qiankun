@@ -14,14 +14,14 @@ import {
     toggleMenu, closeMenu
 } from './ui/render.js';
 import { startHangup, stopHangup } from './ui/battle.js';
-import { startActivity, stopActivity, resumeActivityAfterLoad, formatOfflineReport } from './ui/idle.js';
+import { startActivity, stopActivity, resumeActivityAfterLoad, showOfflineReport, pauseActivity } from './ui/idle.js';
 import { initDragDrop } from './ui/drag.js';
 import { toast } from './ui/dialog.js';
 import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
-    enhanceEquip, craftGear
+    enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -85,8 +85,8 @@ function initGameCore() {
     renderWarehouse();
     rollShopGoods();
     setInterval(saveGame, 5000);
-    // 仅当离线确实够久(≥门槛)才提示；刷新/切后台的零碎时间产出照常结算但不打扰
-    if (offlineReport && offlineReport.elapsedMs >= BALANCE.idle.offlineReportMinMs) toast(formatOfflineReport(offlineReport), 'success');
+    // 仅当离线确实够久(≥门槛)才弹「欢迎回来」；刷新/切后台的零碎时间产出照常结算但不打扰
+    if (offlineReport && offlineReport.elapsedMs >= BALANCE.idle.offlineReportMinMs) showOfflineReport(offlineReport);
 }
 
 // ---------- 统一事件委托：data-act -> 处理器 ----------
@@ -106,6 +106,9 @@ function onDelegatedClick(e) {
         case 'enhance-equip': enhanceEquip(el.dataset.slot); break;
         case 'craft-gear': craftGear(Number(el.dataset.tier), el.dataset.slot); break;
         case 'select-craft-tier': selectCraftTier(Number(el.dataset.tier)); break;
+        case 'challenge-boss': challengeBoss(el.dataset.boss); break;
+        case 'upgrade-gear': upgradeGear(el.dataset.slot); break;
+        case 'sell-material': sellMaterial(el.dataset.key); break;
         case 'stop-hangup': stopHangup(); break;
         case 'hangup': stopActivity(); startHangup(Number(el.dataset.map)); break;   // 开战前先停生产（二者互斥）
         case 'start-activity': stopHangup(); startActivity(el.dataset.id); break;     // 开工前先停战斗
@@ -146,7 +149,14 @@ document.addEventListener('click', onDelegatedClick);
 // 会在重开时被 now-lastTickTime 误算成离线 —— 表现为"每次刷新/上线都跳离线 N 分"。
 // pagehide 覆盖关闭/刷新/移动端切走，visibilitychange(hidden) 覆盖切后台标签。
 window.addEventListener('pagehide', saveGame);
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
+// 切后台/切回前台：手机切 App 通常不重载页面，故在这里也做离线结算——
+// 切走时存时间戳并暂停生产挂机(避免后台节流空转+重复计数)；切回时按离开时长补算离线、续挂、弹「欢迎回来」。
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { saveGame(); pauseActivity(); return; }
+    const rep = resumeActivityAfterLoad();
+    if (rep) { updatePlayerAttributes(); renderProduction(); renderWarehouse(); renderBag(); }
+    if (rep && rep.elapsedMs >= BALANCE.idle.offlineReportMinMs) showOfflineReport(rep);
+});
 
 // 客户端化：屏蔽右键菜单（桌面）与拖拽，配合 CSS 的 user-select:none / -webkit-touch-callout:none
 // 共同实现"脱离浏览器"的手感。输入框豁免右键，保留起名时的粘贴能力。

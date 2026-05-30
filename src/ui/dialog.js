@@ -106,3 +106,8 @@ export function confirmDialog(message, title = '请确认') {
 export function chooseAction(title, message, options) {
     return openModal(title, message, [...options, { label: '取消', value: null }]);
 }
+
+// —— 信息弹窗：富文本 message（innerHTML）+ 单个确认按钮（如离线收益「欢迎回来」）——
+export function infoDialog(message, title = '', btnLabel = '好') {
+    return openModal(title, message, [{ label: btnLabel, value: true, cls: 'btn-success' }]);
+}

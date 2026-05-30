@@ -69,7 +69,7 @@ export const BALANCE = {
     breakthrough: { costPerLevel: 400, hpGain: 80, atkGain: 18, defGain: 8 },
     reborn: { minLevel: 20, baseHp: 250, baseAtk: 35, baseDef: 15 },
 
-    enemy: { baseHp: 280, baseAtk: 35, baseDef: 5 }, // 敌人基础值, 再乘 2^(mapId-1)
+    enemy: { baseHp: 280, baseAtk: 35, baseDef: 5, diffBase: 1.5 }, // 敌人基础值, 再乘 diffBase^(mapId-1)。diffBase 越小=难度越缓、堆装备/强化越能多推关卡(原为2, 太陡致装备近乎无效)
 
     battle: {
         maxRounds: 20,
@@ -86,7 +86,8 @@ export const BALANCE = {
     reward: {
         coinBase: 50, coinPerMap: 30,
         expBase: 40, expPerMap: 40,
-        baseDrop: 0.20,               // 基础掉宝率, 再乘 dropRate/100
+        baseDrop: 0.20,               // 装备掉落率(掉「该区域档位」装备), 再乘 dropRate/100
+        oreDropMax: 2,                // 每场胜利必掉该区域矿石 1~oreDropMax 个(材料导向, 喂打造)
         loseCoinRate: 0.05            // 战败损失当前碎银比例
     },
 
@@ -123,9 +124,12 @@ export const BALANCE = {
     // —— 生产/挂机引擎（采矿·锻造…通用）——
     idle: {
         maxLevel: 99,                         // 生产技能等级上限
-        expC: 50, expP: 2,                    // 升级累计经验曲线: 到达 L 级所需累计经验 = expC * (L-1)^expP
+        expC: 20, expP: 1.9,                  // 升级累计经验曲线: 到达 L 级所需累计经验 = expC*(L-1)^expP（调缓, 早期更快）
         offlineCapMs: 12 * 3600 * 1000,       // 离线最多结算 12 小时
-        offlineReportMinMs: 2 * 60 * 1000     // 离线提示门槛：低于此时长不弹提示(产出照常结算)，避免刷新/切后台时被小额离线打扰
+        offlineReportMinMs: 60 * 1000,        // 离线提示门槛：离开≥此时长才弹「欢迎回来」(产出照常结算)，避免秒级切换刷屏；可调
+        // —— 效率途径：练级本身让你「更快 + 偶尔双倍产出」(不只是解锁高档) ——
+        speedPerLevel: 0.005, speedCap: 0.5,  // 等级提速：每级单次读条 -0.5%，封顶 -50%
+        yieldPerLevel: 0.005, yieldCap: 0.75  // 等级增产：每级 +0.5% 概率「本次产出翻倍」，封顶 75%
     },
 
     // —— 神兵强化（采矿/锻造的核心产出口：用锭+碎银强化已装备的装备）——
@@ -144,6 +148,12 @@ export const BALANCE = {
     // —— 装备成色（随机品阶退居为锻造的小幅波动；tier 才是强度主轴）——
     gear: {
         qualityStep: 0.06          // 成色每级 +6% 属性(凡品0 → 神话+30%)，保留配色/熔炼价值但不越档
+    },
+
+    // —— 神兵进阶（突破打造天花板 T6→T7→T8，吃秘境 Boss 掉的神魂结晶 + 碎银）——
+    upgrade: {
+        crystalCost: { 7: 3, 8: 8 },        // 进到第 N 档需神魂结晶数
+        coinCost: { 7: 30000, 8: 120000 }   // 进到第 N 档需碎银
     }
 };
 
@@ -171,7 +181,8 @@ export const MATERIALS = {
     ingot_xuan:   { name: "玄铁锭", icon: "🔩", price: 180 },
     ingot_cold:   { name: "寒铁锭", icon: "🧊", price: 380 },
     ingot_star:   { name: "星陨锭", icon: "✴️", price: 800 },
-    ingot_jade:   { name: "玄晶锭", icon: "💠", price: 1700 }
+    ingot_jade:   { name: "玄晶锭", icon: "💠", price: 1700 },
+    soul_crystal: { name: "神魂结晶", icon: "💎", price: 0 }   // 仅秘境 Boss 掉落，用于「神兵进阶」突破打造天花板(T6→神话→仙器)
 };
 
 // 挂机动作表。字段：
@@ -206,11 +217,27 @@ export const ACTIVITIES = [
 // 强化(+N)在档内微调。换档=大跨步，强化=细打磨——两根轴。
 // ingot/ingotQty/coin：打造「一件」的花费；power：该档相对 1 档的属性倍率。
 // ============================================================
+// ore：该档对应的矿石(战斗在该区域掉此矿，喂打造/熔炼)。ingot：打造/强化耗的锭。
 export const GEAR_TIERS = [
-    { tier: 1, name: "凡铁", smithingReq: 1,  ingot: "ingot_copper", ingotQty: 4, power: 1.0,  coin: 200 },
-    { tier: 2, name: "精铁", smithingReq: 12, ingot: "ingot_iron",   ingotQty: 4, power: 2.0,  coin: 700 },
-    { tier: 3, name: "玄铁", smithingReq: 25, ingot: "ingot_xuan",   ingotQty: 5, power: 3.8,  coin: 2000 },
-    { tier: 4, name: "寒铁", smithingReq: 40, ingot: "ingot_cold",   ingotQty: 5, power: 7.0,  coin: 5500 },
-    { tier: 5, name: "星陨", smithingReq: 60, ingot: "ingot_star",   ingotQty: 6, power: 13.0, coin: 15000 },
-    { tier: 6, name: "玄晶", smithingReq: 80, ingot: "ingot_jade",   ingotQty: 6, power: 24.0, coin: 42000 }
+    { tier: 1, name: "凡铁", smithingReq: 1,  ore: "ore_copper", ingot: "ingot_copper", ingotQty: 4, power: 1.0,  coin: 200,   craftable: true },
+    { tier: 2, name: "精铁", smithingReq: 12, ore: "ore_iron",   ingot: "ingot_iron",   ingotQty: 4, power: 2.0,  coin: 700,   craftable: true },
+    { tier: 3, name: "玄铁", smithingReq: 25, ore: "ore_xuan",   ingot: "ingot_xuan",   ingotQty: 5, power: 3.8,  coin: 2000,  craftable: true },
+    { tier: 4, name: "寒铁", smithingReq: 40, ore: "ore_cold",   ingot: "ingot_cold",   ingotQty: 5, power: 7.0,  coin: 5500,  craftable: true },
+    { tier: 5, name: "星陨", smithingReq: 60, ore: "ore_star",   ingot: "ingot_star",   ingotQty: 6, power: 13.0, coin: 15000, craftable: true },
+    { tier: 6, name: "玄晶", smithingReq: 80, ore: "ore_jade",   ingot: "ingot_jade",   ingotQty: 6, power: 24.0, coin: 42000, craftable: true },
+    // 以下两档「打造不出来」(craftable:false)——突破纯锻造天花板，只能靠秘境 Boss 掉的神魂结晶做「神兵进阶」升上来。
+    { tier: 7, name: "神话", smithingReq: 999, ore: null, ingot: null, ingotQty: 0, power: 42.0, coin: 0, craftable: false },
+    { tier: 8, name: "仙器", smithingReq: 999, ore: null, ingot: null, ingotQty: 0, power: 72.0, coin: 0, craftable: false }
+];
+
+// ============================================================
+// 秘境 Boss（后期内容）：定点强敌，胜利掉「神魂结晶」(唯一来源)。难度 = getMapDifficulty(mapEquiv)*toughness。
+// 需达到 realmReq 境界才可挑战；可反复刷(能打赢=靠真实战力，自带门槛)。
+// ============================================================
+export const BOSSES = [
+    { id: "b1", name: "噬魂妖王",     realmReq: 25,  mapEquiv: 15, toughness: 1.5, crystalMin: 1, crystalMax: 2, coin: 8000 },
+    { id: "b2", name: "血煞魔尊",     realmReq: 45,  mapEquiv: 25, toughness: 1.6, crystalMin: 1, crystalMax: 3, coin: 20000 },
+    { id: "b3", name: "万剑剑圣",     realmReq: 70,  mapEquiv: 35, toughness: 1.8, crystalMin: 2, crystalMax: 4, coin: 50000 },
+    { id: "b4", name: "幽冥鬼帝",     realmReq: 100, mapEquiv: 45, toughness: 2.0, crystalMin: 3, crystalMax: 6, coin: 120000 },
+    { id: "b5", name: "混沌虚空兽",   realmReq: 140, mapEquiv: 55, toughness: 2.5, crystalMin: 5, crystalMax: 9, coin: 300000 }
 ];

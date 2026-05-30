@@ -124,6 +124,7 @@
         .wh-item { background: #0f0f0f; border: 1px solid #222; border-radius: 4px; padding: 8px 4px; text-align: center; font-size: 12px; color: var(--text-main); }
         .wh-item .wh-ico { font-size: 22px; line-height: 1.3; }
         .wh-item .wh-qty { color: var(--color-gold); font-weight: bold; }
+        .wh-item .wh-sell { display: block; margin-top: 6px; padding: 3px 4px; font-size: 10px; width: 100%; box-sizing: border-box; }
         .wh-empty { color: var(--text-muted); text-align: center; padding: 24px 10px; font-size: 13px; }
 
         /* 打造图谱：档位标签页（卡片复用 .act-card） */

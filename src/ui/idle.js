@@ -6,10 +6,10 @@
 // ============================================================
 import { state } from '../state.js';
 import { BALANCE, ACTIVITIES, MATERIALS, PROFESSIONS } from '../config.js';
-import { levelFromExp, generateItemByMatrix } from '../domain.js';
+import { levelFromExp, generateItemByMatrix, effDurationMs, bonusYieldChance } from '../domain.js';
 import { renderProduction, renderWarehouse, renderBag, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
-import { toast } from './dialog.js';
+import { toast, infoDialog } from './dialog.js';
 import { formatNumber } from '../util.js';
 
 const ACT_MAP = Object.fromEntries(ACTIVITIES.map(a => [a.id, a]));
@@ -17,6 +17,13 @@ export function getActivity(id) { return ACT_MAP[id]; }
 export function currentActivity() { return state.player.activity ? ACT_MAP[state.player.activity] : null; }
 
 let timer = null;
+
+// 按「当前技能等级的提速后读条」起循环；升级后调用即可即时加速。
+function startTimer(act) {
+    if (timer) clearInterval(timer);
+    const lv = levelFromExp(state.player.professions[act.prof].exp);
+    timer = setInterval(tick, effDurationMs(act.durationMs, lv));
+}
 
 // —— 物料仓库增减（map 形式天然堆叠；归零即删键，仓库不残留 0）——
 function addMaterial(player, key, qty) {
@@ -46,7 +53,11 @@ function runOnce(act) {
     if (!hasInputs(player, act)) return { ok: false, reason: 'input' };
 
     if (act.inputs) for (const [k, n] of Object.entries(act.inputs)) addMaterial(player, k, -n);
-    if (act.outputs) for (const [k, n] of Object.entries(act.outputs)) addMaterial(player, k, n);
+    // 等级增产：本次有 bonusYieldChance 概率「产出翻倍」(熔炼则同矿出双锭=材料效率)
+    const lv = levelFromExp(player.professions[act.prof].exp);
+    const mult = (Math.random() < bonusYieldChance(lv)) ? 2 : 1;
+    const yielded = {};
+    if (act.outputs) for (const [k, n] of Object.entries(act.outputs)) { const q = n * mult; addMaterial(player, k, q); yielded[k] = q; }
     let item = null, soldCoin = 0;
     if (act.craftItem) {
         const gear = generateItemByMatrix(act.craftItem);
@@ -54,7 +65,7 @@ function runOnce(act) {
         else { soldCoin = gear.price; player.coin += gear.price; }
     }
     player.professions[act.prof].exp += act.exp;
-    return { ok: true, item, soldCoin };
+    return { ok: true, yielded, doubled: mult > 1, item, soldCoin };
 }
 
 // —— 在线 tick：每 durationMs 触发一次 ——
@@ -71,7 +82,10 @@ function tick() {
         return;
     }
     const after = levelFromExp(player.professions[act.prof].exp);
-    if (after > before) toast(`【${PROFESSIONS[act.prof].name}】突破至 ${after} 级！`, 'success');
+    if (after > before) {
+        toast(`【${PROFESSIONS[act.prof].name}】突破至 ${after} 级！`, 'success');
+        startTimer(act); // 升级→提速生效，按新读条重置循环
+    }
 
     // 仅当生产页可见时才重绘面板（挂机本就允许后台继续，隐藏页无需渲染）
     if (isProductionPageVisible()) { renderProduction(); renderWarehouse(); }
@@ -92,9 +106,8 @@ export function startActivity(id) {
     }
     if (!hasInputs(player, act)) { toast(`原料不足，无法开始「${act.name}」。`, 'error'); return; }
 
-    if (timer) clearInterval(timer);
     player.activity = id;
-    timer = setInterval(tick, act.durationMs);
+    startTimer(act);
     renderProduction();
 }
 
@@ -104,6 +117,12 @@ export function stopActivity() {
         state.player.activity = null;
         renderProduction();
     }
+}
+
+// 切后台时调用：只暂停 tick 循环、保留 player.activity（切回前台据此补算离线并续挂）。
+// 不暂停的话后台定时器被浏览器节流仍会零星空转，且与切回时的离线补算重复计数。
+export function pauseActivity() {
+    if (timer) { clearInterval(timer); timer = null; }
 }
 
 // —— 离线结算：读档时按 (now - lastTickTime) 估算这段时间的产出，封顶 offlineCapMs，
@@ -119,18 +138,19 @@ export function applyOfflineProgress() {
     const last = player.lastTickTime || 0;
     if (!last) return null;
 
-    const elapsed = Math.max(0, Math.min(Date.now() - last, BALANCE.idle.offlineCapMs)); // 防系统时钟回拨成负值
-    const cycles = Math.min(Math.floor(elapsed / act.durationMs), 20000);                // 上限防极端循环(正常会被原料约束更早停)
+    const beforeLv = levelFromExp(player.professions[act.prof].exp);
+    const effDur = effDurationMs(act.durationMs, beforeLv);                               // 按离线开始时的等级提速估算(略保守)
+    const elapsed = Math.max(0, Math.min(Date.now() - last, BALANCE.idle.offlineCapMs));  // 防系统时钟回拨成负值
+    const cycles = Math.min(Math.floor(elapsed / effDur), 20000);                         // 上限防极端循环(正常会被原料约束更早停)
     if (cycles <= 0) return null;
 
-    const beforeLv = levelFromExp(player.professions[act.prof].exp);
     const gained = {};
     let expGained = 0, items = 0, soldCoin = 0, done = 0, stoppedReason = null;
     for (let i = 0; i < cycles; i++) {
         const r = runOnce(act);
         if (!r.ok) { stoppedReason = r.reason; break; }
         expGained += act.exp;
-        if (act.outputs) for (const [k, n] of Object.entries(act.outputs)) gained[k] = (gained[k] || 0) + n;
+        for (const [k, q] of Object.entries(r.yielded)) gained[k] = (gained[k] || 0) + q; // 含等级增产翻倍
         if (r.item) items++;
         if (r.soldCoin) soldCoin += r.soldCoin;
         done++;
@@ -140,7 +160,7 @@ export function applyOfflineProgress() {
 
     const afterLv = levelFromExp(player.professions[act.prof].exp);
     return {
-        act, profName: PROFESSIONS[act.prof].name, elapsedMs: done * act.durationMs,
+        act, profName: PROFESSIONS[act.prof].name, elapsedMs: done * effDur,
         cycles: done, expGained, gained, items, soldCoin, stoppedReason,
         levelUp: afterLv > beforeLv ? { from: beforeLv, to: afterLv } : null
     };
@@ -150,24 +170,35 @@ export function applyOfflineProgress() {
 export function resumeActivityAfterLoad() {
     const report = applyOfflineProgress();
     const act = ACT_MAP[state.player.activity];
-    if (act) {
-        if (timer) clearInterval(timer);
-        timer = setInterval(tick, act.durationMs);
-    }
+    if (act) startTimer(act);
     return report;
 }
 
-// 把离线报告格式化成一句话提示（物料用中文名，时长换算成时/分）。
-export function formatOfflineReport(rep) {
-    if (!rep) return '';
-    const mins = Math.round(rep.elapsedMs / 60000);
-    const dur = mins >= 60 ? `${Math.floor(mins / 60)}时${mins % 60}分` : `${mins}分`;
-    const parts = [];
-    for (const [k, n] of Object.entries(rep.gained)) parts.push(`${MATERIALS[k] ? MATERIALS[k].name : k}×${n}`);
-    if (rep.items > 0) parts.push(`神兵×${rep.items}`);
-    if (rep.soldCoin > 0) parts.push(`满袋自动熔炼得碎银 ${formatNumber(rep.soldCoin)} 文`);
-    const yield_ = parts.length ? parts.join('、') : '无产出';
-    const lvUp = rep.levelUp ? `，【${rep.profName}】升至 ${rep.levelUp.to} 级` : '';
-    const stop = rep.stoppedReason ? '（中途原料耗尽已停）' : '';
-    return `离线 ${dur} · ${rep.act.name}：${yield_}${lvUp}${stop}`;
+function formatDuration(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s} 秒`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} 分`;
+    return `${Math.floor(m / 60)} 时 ${m % 60} 分`;
+}
+
+// 离线收益弹窗（梅尔沃式「欢迎回来」）：技能图标 + 离开时长 + 上限 + 分项收益 + 收功按钮。
+export function showOfflineReport(rep) {
+    if (!rep) return;
+    const capH = Math.round(BALANCE.idle.offlineCapMs / 3600000);
+    const profIcon = PROFESSIONS[rep.act.prof] ? PROFESSIONS[rep.act.prof].icon : '⏳';
+    const lines = [`获得 <b style="color:var(--color-success)">${formatNumber(rep.expGained)}</b> 点【${rep.profName}】经验`];
+    if (rep.levelUp) lines.push(`【${rep.profName}】升至 <b style="color:var(--color-gold)">${rep.levelUp.to}</b> 级`);
+    for (const [k, n] of Object.entries(rep.gained)) lines.push(`${MATERIALS[k] ? MATERIALS[k].icon : '📦'} ${MATERIALS[k] ? MATERIALS[k].name : k} ×<b style="color:var(--color-gold)">${formatNumber(n)}</b>`);
+    if (rep.items > 0) lines.push(`🗡️ 神兵 ×<b>${rep.items}</b>`);
+    if (rep.soldCoin > 0) lines.push(`满袋自动熔炼得碎银 <b style="color:var(--color-gold)">${formatNumber(rep.soldCoin)}</b> 文`);
+    const stop = rep.stoppedReason ? `<div style="color:var(--color-accent);font-size:12px;margin-top:10px;">（中途原料耗尽，已停工）</div>` : '';
+    const html =
+        `<div style="font-size:42px;line-height:1;margin-bottom:6px;">${profIcon}</div>` +
+        `<div>你离开了约 <b style="color:#fff;">${formatDuration(rep.elapsedMs)}</b></div>` +
+        `<div style="color:var(--color-blue);font-size:12px;margin-bottom:12px;">（离线进度上限 ${capH} 小时）</div>` +
+        `<div style="color:#888;font-size:13px;margin-bottom:6px;">闭关「${rep.act.name}」期间：</div>` +
+        `<div style="text-align:left;display:inline-block;line-height:2;">${lines.map(l => `<div>· ${l}</div>`).join('')}</div>` +
+        stop;
+    infoDialog(html, '✨ 闭关出关！', '收功');
 }
