@@ -13,6 +13,11 @@
             --color-honghuang: #ff3366;
         }
 
+        /* —— 客户端化：禁止选中文字 / iOS 长按复制·放大镜浮层 / 图片拖拽 / 点按灰色高亮。输入框豁免，保证起名可编辑粘贴 —— */
+        html, body { -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+        input, textarea, [contenteditable] { -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; user-select: text; -webkit-touch-callout: default; }
+        img, svg, .sprite-vector { -webkit-user-drag: none; user-select: none; }
+
         body { background-color: var(--bg-main); color: var(--text-main); font-family: "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 15px; display: flex; justify-content: center; }
         #game-window { width: 100%; max-width: 1200px; box-sizing: border-box; background: var(--bg-panel); border: 2px solid #222; box-shadow: 0 20px 50px rgba(0,0,0,0.9); border-radius: 8px; overflow: hidden; position: relative; }
         

@@ -117,4 +117,10 @@ function init() {
 }
 
 document.addEventListener('click', onDelegatedClick);
+
+// 客户端化：屏蔽右键菜单（桌面）与拖拽，配合 CSS 的 user-select:none / -webkit-touch-callout:none
+// 共同实现"脱离浏览器"的手感。输入框豁免右键，保留起名时的粘贴能力。
+document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
+document.addEventListener('dragstart', e => e.preventDefault());
+
 window.addEventListener('load', init);
