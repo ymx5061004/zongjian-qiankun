@@ -4,7 +4,7 @@
 // 取代了原来满天飞的 inline onclick 和全局 event。
 // ============================================================
 import { state } from './state.js';
-import { epicStory } from './config.js';
+import { epicStory, BALANCE } from './config.js';
 import { loadGame, saveGame } from './storage.js';
 import {
     initTooltipEvent, hideTooltip, switchPage,
@@ -75,6 +75,7 @@ function enterGame() {
 
 function initGameCore() {
     const offlineReport = resumeActivityAfterLoad(); // 先结算离线产出(改 player)+续挂，再渲染
+    saveGame();                                       // 立刻把"离线已结算"的新基准(lastTickTime=now)落盘，下次刷新不再重复误判离线
     updatePlayerAttributes();
     renderForge();
     renderBag();
@@ -84,7 +85,8 @@ function initGameCore() {
     renderWarehouse();
     rollShopGoods();
     setInterval(saveGame, 5000);
-    if (offlineReport) toast(formatOfflineReport(offlineReport), 'success');
+    // 仅当离线确实够久(≥门槛)才提示；刷新/切后台的零碎时间产出照常结算但不打扰
+    if (offlineReport && offlineReport.elapsedMs >= BALANCE.idle.offlineReportMinMs) toast(formatOfflineReport(offlineReport), 'success');
 }
 
 // ---------- 统一事件委托：data-act -> 处理器 ----------
@@ -136,6 +138,13 @@ function init() {
 }
 
 document.addEventListener('click', onDelegatedClick);
+
+// 关闭/刷新/切后台时立刻存档：让 lastTickTime 精确停在离开那一刻。
+// 否则在线时"还没轮到 5 秒定时存档的那几秒~几十秒"(尤其后台标签页定时器被浏览器节流到约 1 次/分)
+// 会在重开时被 now-lastTickTime 误算成离线 —— 表现为"每次刷新/上线都跳离线 N 分"。
+// pagehide 覆盖关闭/刷新/移动端切走，visibilitychange(hidden) 覆盖切后台标签。
+window.addEventListener('pagehide', saveGame);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
 
 // 客户端化：屏蔽右键菜单（桌面）与拖拽，配合 CSS 的 user-select:none / -webkit-touch-callout:none
 // 共同实现"脱离浏览器"的手感。输入框豁免右键，保留起名时的粘贴能力。
