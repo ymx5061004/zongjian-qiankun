@@ -14,7 +14,11 @@ export function makeDefaultPlayer() {
         bag: [], bagMax: 96,
         skills: [],
         currentMapId: null,
-        lastTickTime: 0
+        // —— 生产/挂机 ——
+        professions: { mining: { exp: 0 }, smithing: { exp: 0 } }, // 各生产技能累计经验
+        materials: {},                 // 可堆叠物料仓库 { 物料key: 数量 }
+        activity: null,                // 当前挂机生产动作 id（与战斗挂机互斥）；存档保留以便读档续挂+离线结算
+        lastTickTime: 0                // 上次存活时间戳（saveGame 时刷新）；读档据此结算离线产出
     };
 }
 

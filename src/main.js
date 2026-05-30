@@ -10,9 +10,11 @@ import {
     initTooltipEvent, hideTooltip, switchPage,
     updatePlayerAttributes, renderForge, renderBag,
     renderMapList, renderPlayerSkills, rollShopGoods,
+    renderProduction, renderWarehouse,
     toggleMenu, closeMenu
 } from './ui/render.js';
 import { startHangup, stopHangup } from './ui/battle.js';
+import { startActivity, stopActivity, resumeActivityAfterLoad, formatOfflineReport } from './ui/idle.js';
 import { initDragDrop } from './ui/drag.js';
 import { toast } from './ui/dialog.js';
 import {
@@ -71,13 +73,17 @@ function enterGame() {
 }
 
 function initGameCore() {
+    const offlineReport = resumeActivityAfterLoad(); // 先结算离线产出(改 player)+续挂，再渲染
     updatePlayerAttributes();
     renderForge();
     renderBag();
     renderMapList();
     renderPlayerSkills();
+    renderProduction();
+    renderWarehouse();
     rollShopGoods();
     setInterval(saveGame, 5000);
+    if (offlineReport) toast(formatOfflineReport(offlineReport), 'success');
 }
 
 // ---------- 统一事件委托：data-act -> 处理器 ----------
@@ -95,7 +101,9 @@ function onDelegatedClick(e) {
         case 'reborn': triggerReborn(); break;
         case 'unequip': unequip(el.dataset.slot); break;
         case 'stop-hangup': stopHangup(); break;
-        case 'hangup': startHangup(Number(el.dataset.map)); break;
+        case 'hangup': stopActivity(); startHangup(Number(el.dataset.map)); break;   // 开战前先停生产（二者互斥）
+        case 'start-activity': stopHangup(); startActivity(el.dataset.id); break;     // 开工前先停战斗
+        case 'stop-activity': stopActivity(); break;
         case 'remove-forge': removeFromForge(Number(el.dataset.idx)); break;
         case 'forge': executeForge(); break;
         case 'smelt': smeltByQuality(el.dataset.q.split(',').map(Number), el.dataset.label); break;

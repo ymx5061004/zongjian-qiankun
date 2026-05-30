@@ -6,7 +6,7 @@ import { state, makeDefaultPlayer } from './state.js';
 import { SKILL_SUFFIXES } from './config.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 export function saveGame() {
     if (!state.player.name) return;
@@ -35,6 +35,15 @@ export function loadGame() {
         // 以默认值为底，旧档缺的新字段自动补全 —— 加字段不再炸档
         state.player = Object.assign(makeDefaultPlayer(), data);
         if (state.player.honghuangPower === undefined) state.player.honghuangPower = 0;
+        // 生产体系字段防御性补全（v3 新增；data 整体覆盖了默认对象，故逐项兜底，将来加新技能也在此补键）
+        const p = state.player;
+        if (!p.professions || typeof p.professions !== 'object') p.professions = {};
+        // 校验到 exp 必须是有限数：旧档/损坏档里 professions[k] 缺 exp 会让后续 exp+= 变 NaN
+        ['mining', 'smithing'].forEach(k => { if (!p.professions[k] || !Number.isFinite(p.professions[k].exp)) p.professions[k] = { exp: 0 }; });
+        if (!p.materials || typeof p.materials !== 'object') p.materials = {};
+        if (p.activity === undefined) p.activity = null;
+        // lastTickTime 缺失/非法时设为当前时刻：否则离线结算会因 last=0 被整段跳过（旧档升级尤甚）
+        if (!Number.isFinite(p.lastTickTime) || p.lastTickTime <= 0) p.lastTickTime = Date.now();
     } catch (e) {
         console.warn('存档损坏，已忽略：', e);
     }

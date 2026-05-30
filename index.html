@@ -44,6 +44,13 @@
                 </div>
             </div>
             <div class="menu-group">
+                <div class="menu-group-title" data-act="toggle-group">生产经营</div>
+                <div class="menu-items">
+                    <button class="menu-item" data-act="switch-page" data-page="mining"><span class="menu-icon">⛏️</span>采矿</button>
+                    <button class="menu-item" data-act="switch-page" data-page="smithing"><span class="menu-icon">🔨</span>锻造</button>
+                </div>
+            </div>
+            <div class="menu-group">
                 <div class="menu-group-title" data-act="toggle-group">行囊武学</div>
                 <div class="menu-items">
                     <button class="menu-item active" data-act="switch-page" data-page="bag"><span class="menu-icon">🎒</span>行囊与洪炉</button>
@@ -202,6 +209,32 @@
                     <button class="btn" style="padding:2px 8px;" data-act="refresh-shop">手动消耗500文刷新</button>
                 </div>
                 <div class="scroll-box" id="shop-goods-box"></div>
+            </div>
+        </div>
+
+        <div id="page-mining" class="page">
+            <div class="sub-panel">
+                <div class="panel-title">⛏️ 采矿 · <span id="mining-level" style="color:var(--color-success);">Lv.1</span></div>
+                <div class="prof-bar-wrap"><div class="prof-bar-inner" id="mining-exp-bar"></div></div>
+                <div class="prof-exp-text" id="mining-exp-text"></div>
+                <div class="scroll-box" id="mining-list"></div>
+            </div>
+            <div class="sub-panel">
+                <div class="panel-title">📦 物料仓库</div>
+                <div class="scroll-box" id="warehouse-mining"></div>
+            </div>
+        </div>
+
+        <div id="page-smithing" class="page">
+            <div class="sub-panel">
+                <div class="panel-title">🔨 锻造 · <span id="smithing-level" style="color:var(--color-success);">Lv.1</span></div>
+                <div class="prof-bar-wrap"><div class="prof-bar-inner" id="smithing-exp-bar"></div></div>
+                <div class="prof-exp-text" id="smithing-exp-text"></div>
+                <div class="scroll-box" id="smithing-list"></div>
+            </div>
+            <div class="sub-panel">
+                <div class="panel-title">📦 物料仓库</div>
+                <div class="scroll-box" id="warehouse-smithing"></div>
             </div>
         </div>
 

@@ -54,6 +54,7 @@ npx serve .
 - **加新玩法动作**：在 `src/actions.js` 写控制器函数 → 在 HTML/渲染处加 `data-act="xxx"` → 在 `src/main.js` 的委托 `switch` 里加一个分支。
 - **加新页签**：在 `index.html` 左侧菜单 `<aside class="nav-sidebar">` 的某个 `.menu-group` 里加一个 `.menu-item` 按钮（带 `data-act="switch-page" data-page="新名"`），并加对应 `.page` 容器 → 在 `render.js` 的 `switchPage` 里补该页的渲染调用。整组新功能（如未来的采集/加工技能）则新增一个 `.menu-group` 分组。导航是左侧竖向分组菜单（桌面常驻、移动端汉堡抽屉），分组标题点击折叠（`data-act="toggle-group"`）。
 - **改战斗规则**：纯逻辑在 `src/domain.js` 的 `simulateBattle`（返回 `{win, events}`），动画演出在 `src/ui/battle.js`，两者解耦——改数值/规则不动动画，改动画不动规则。
+- **加生产技能 / 采集·加工动作**（武侠版梅尔沃的非战斗侧）：往 `src/config.js` 的 `PROFESSIONS`（技能）/ `MATERIALS`（可堆叠物料）/ `ACTIVITIES`（挂机动作：读条·消耗·产出·给谁经验）加数据即可，通用挂机引擎 `src/ui/idle.js` 直接驱动（含等级/经验、离线收益、与战斗挂机互斥），**引擎本身不用改**。新增独立技能页同「加新页签」。`craftItem` 类动作产出随机装备进背包、背包满则自动熔炼成碎银。
 
 ## 回退
 

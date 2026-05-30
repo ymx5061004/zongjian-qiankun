@@ -14,6 +14,20 @@ export function getRealmName(lv) {
     return `${REALMS[idx]}${sub}重`;
 }
 
+// —— 生产技能经验曲线（纯函数）——
+// 到达 level 级所需的「累计」经验（level=1 时为 0）。曲线参数集中在 BALANCE.idle。
+export function expForLevel(level) {
+    const { expC, expP } = BALANCE.idle;
+    return Math.floor(expC * Math.pow(Math.max(0, level - 1), expP));
+}
+// 给定累计经验，反推当前等级（封顶 BALANCE.idle.maxLevel）。
+export function levelFromExp(exp) {
+    const max = BALANCE.idle.maxLevel;
+    let lv = 1;
+    while (lv < max && exp >= expForLevel(lv + 1)) lv++;
+    return lv;
+}
+
 // —— 由 player 派生当前战斗属性。纯函数：返回 {stats, honghuangPower} ——
 export function computeStats(player) {
     const rebornMult = 1 + player.rebornCount * BALANCE.rebornMultPerCount;

@@ -3,9 +3,9 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix } from '../domain.js';
+import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix, levelFromExp, expForLevel } from '../domain.js';
 import { formatNumber } from '../util.js';
 
 // ---------- 浮动提示 tooltip ----------
@@ -429,6 +429,73 @@ export function renderPlayerSkills() {
     });
 }
 
+// ---------- 生产技能页（采矿 / 锻造…通用，数据来自 config.ACTIVITIES）----------
+function matName(k) { return MATERIALS[k] ? MATERIALS[k].name : k; }
+function matIcon(k) { return MATERIALS[k] ? MATERIALS[k].icon : '📦'; }
+
+function activityCardHtml(act, player) {
+    const lv = levelFromExp(player.professions[act.prof].exp);
+    const locked = lv < act.levelReq;
+    const running = player.activity === act.id;
+    const profName = PROFESSIONS[act.prof].name;
+
+    const outParts = [];
+    if (act.outputs) for (const [k, n] of Object.entries(act.outputs)) outParts.push(`${matName(k)}×${n}`);
+    if (act.craftItem) outParts.push('随机神兵→行囊');
+    const meta = [`产出 ${outParts.join('、')}`, `经验+${act.exp}`, `${(act.durationMs / 1000).toFixed(1)}秒`];
+    if (act.inputs) {
+        const inParts = Object.entries(act.inputs).map(([k, n]) => `${matName(k)}×${n}`);
+        meta.push(`消耗 ${inParts.join('、')}`);
+    }
+    const ico = act.craftItem ? '🗡️' : (act.outputs ? matIcon(Object.keys(act.outputs)[0]) : '⛏️');
+
+    let btn;
+    if (locked) btn = `<button class="btn" disabled>🔒 需${profName}${act.levelReq}级</button>`;
+    else if (running) btn = `<button class="btn btn-danger" data-act="stop-activity">⏹ 停止</button>`;
+    else btn = `<button class="btn btn-success" data-act="start-activity" data-id="${act.id}">▶ 开始</button>`;
+
+    return `<div class="act-card ${locked ? 'locked' : ''} ${running ? 'running' : ''}">
+        <div class="act-head"><span class="act-title">${ico} ${act.name}</span>${btn}</div>
+        <div class="act-meta">${meta.join(' · ')}</div>
+        <div class="act-progress"><i style="animation-duration:${act.durationMs}ms"></i></div>
+    </div>`;
+}
+
+// 渲染所有生产技能区块（等级/经验条/动作列表）。各 DOM 不存在时静默跳过，故未建页也安全。
+export function renderProduction() {
+    const player = state.player;
+    const maxLv = BALANCE.idle.maxLevel;
+    Object.keys(PROFESSIONS).forEach(prof => {
+        const lvEl = document.getElementById(`${prof}-level`);
+        if (!lvEl) return;
+        const exp = player.professions[prof] ? player.professions[prof].exp : 0;
+        const lv = levelFromExp(exp);
+        lvEl.innerText = `Lv.${lv}`;
+        const cur = expForLevel(lv), next = expForLevel(lv + 1);
+        const bar = document.getElementById(`${prof}-exp-bar`);
+        if (bar) bar.style.width = (lv >= maxLv ? 100 : Math.floor(((exp - cur) / (next - cur)) * 100)) + '%';
+        const expTxt = document.getElementById(`${prof}-exp-text`);
+        if (expTxt) expTxt.innerText = lv >= maxLv ? '已臻化境（满级）' : `修为 ${formatNumber(exp - cur)} / ${formatNumber(next - cur)}`;
+        const list = document.getElementById(`${prof}-list`);
+        if (list) list.innerHTML = ACTIVITIES.filter(a => a.prof === prof).map(a => activityCardHtml(a, player)).join('');
+    });
+}
+
+// 渲染物料仓库（采矿/锻造两页各有一个容器，内容相同：列出所有持有量>0 的物料）。
+export function renderWarehouse() {
+    const player = state.player;
+    const keys = Object.keys(MATERIALS).filter(k => (player.materials[k] || 0) > 0);
+    const html = keys.length
+        ? `<div class="wh-grid">` + keys.map(k =>
+            `<div class="wh-item"><div class="wh-ico">${MATERIALS[k].icon}</div>${MATERIALS[k].name}<br><span class="wh-qty">${formatNumber(player.materials[k])}</span></div>`
+        ).join('') + `</div>`
+        : `<div class="wh-empty">— 仓库空空如也，去采矿 / 熔炼积攒物料吧 —</div>`;
+    ['warehouse-mining', 'warehouse-smithing'].forEach(id => {
+        const box = document.getElementById(id);
+        if (box) box.innerHTML = html;
+    });
+}
+
 // ---------- 左侧菜单抽屉开关（仅移动端 ≤768 生效：桌面侧栏常驻、无 .open 类，调用无副作用）----------
 export function toggleMenu() {
     const sb = document.getElementById('nav-sidebar');
@@ -453,8 +520,9 @@ export function switchPage(pageId, tabEl) {
     if (pageId === 'kungfu') renderPlayerSkills();
     if (pageId === 'shop') renderShopGoods();
     if (pageId === 'adventure') renderMapList();
-    if (pageId === 'bag') renderForge();
+    if (pageId === 'bag') { renderForge(); renderBag(); } // renderBag：补刷挂机期间打造入袋的装备
     if (pageId === 'guide') renderGuide();
+    if (pageId === 'mining' || pageId === 'smithing') { renderProduction(); renderWarehouse(); }
 }
 
 // ---------- 江湖秘典：游戏全机制说明（只读静态页）----------

@@ -118,5 +118,66 @@ export const BALANCE = {
     hhSkillPrice: 380000,
 
     shopHHChance: 0.4,                        // 黑市出现洪荒孤本的概率
-    shopRefreshCost: 500                      // 黑市手动刷新花费(文)
+    shopRefreshCost: 500,                     // 黑市手动刷新花费(文)
+
+    // —— 生产/挂机引擎（采矿·锻造…通用）——
+    idle: {
+        maxLevel: 99,                         // 生产技能等级上限
+        expC: 50, expP: 2,                    // 升级累计经验曲线: 到达 L 级所需累计经验 = expC * (L-1)^expP
+        offlineCapMs: 12 * 3600 * 1000        // 离线最多结算 12 小时
+    }
 };
+
+// ============================================================
+// 生产技能体系（武侠版梅尔沃的「非战斗」侧）。
+// 加新技能：往 PROFESSIONS 加一个键；加新产物：往 MATERIALS 加；
+// 加新挂机动作：往 ACTIVITIES 加一条（数据驱动，通用引擎 src/ui/idle.js 直接吃）。
+// 目前首条产线：采矿(出矿石) → 锻造(熔炼成锭 / 打造神兵进背包)。
+// ============================================================
+export const PROFESSIONS = {
+    mining:   { name: "采矿", icon: "⛏️", desc: "开采各色矿石，为锻造与炼器供给原料。" },
+    smithing: { name: "锻造", icon: "🔨", desc: "将矿石熔炼成锭，再以锭打造神兵利器。" }
+};
+
+// 可堆叠物料（存 player.materials = { key: 数量 }）。price 为单个回收/出售价（文）。
+export const MATERIALS = {
+    ore_copper: { name: "铜矿石",   icon: "🟤", price: 12 },
+    ore_iron:   { name: "铁矿石",   icon: "⚪", price: 30 },
+    ore_xuan:   { name: "玄铁矿",   icon: "🟣", price: 70 },
+    ore_cold:   { name: "寒铁矿",   icon: "🔵", price: 150 },
+    ore_star:   { name: "星陨矿",   icon: "🟡", price: 320 },
+    ore_jade:   { name: "玄晶矿",   icon: "🟢", price: 680 },
+    ingot_copper: { name: "铜锭",   icon: "🔶", price: 35 },
+    ingot_iron:   { name: "铁锭",   icon: "⚙️", price: 80 },
+    ingot_xuan:   { name: "玄铁锭", icon: "🔩", price: 180 },
+    ingot_cold:   { name: "寒铁锭", icon: "🧊", price: 380 },
+    ingot_star:   { name: "星陨锭", icon: "✴️", price: 800 },
+    ingot_jade:   { name: "玄晶锭", icon: "💠", price: 1700 }
+};
+
+// 挂机动作表。字段：
+//   prof: 所属技能；levelReq: 解锁等级；durationMs: 单次读条；exp: 单次该技能经验；
+//   inputs: { 物料key: 数量 }（消耗，可空）；outputs: { 物料key: 数量 }（产出物料，可空）；
+//   craftItem: 数字 → 产物是「随机装备」直接进背包（值作为 generateItemByMatrix 的 levelFact），不入 outputs。
+export const ACTIVITIES = [
+    // —— 采矿（无消耗，纯产矿石）——
+    { id: "mine_copper", prof: "mining", tier: 1, name: "开采铜矿",   levelReq: 1,  durationMs: 3000, exp: 7,   outputs: { ore_copper: 1 } },
+    { id: "mine_iron",   prof: "mining", tier: 2, name: "开采铁矿",   levelReq: 10, durationMs: 3000, exp: 17,  outputs: { ore_iron: 1 } },
+    { id: "mine_xuan",   prof: "mining", tier: 3, name: "开采玄铁",   levelReq: 25, durationMs: 3500, exp: 35,  outputs: { ore_xuan: 1 } },
+    { id: "mine_cold",   prof: "mining", tier: 4, name: "开采寒铁",   levelReq: 40, durationMs: 4000, exp: 55,  outputs: { ore_cold: 1 } },
+    { id: "mine_star",   prof: "mining", tier: 5, name: "开采星陨铁", levelReq: 60, durationMs: 4500, exp: 80,  outputs: { ore_star: 1 } },
+    { id: "mine_jade",   prof: "mining", tier: 6, name: "开采玄晶",   levelReq: 80, durationMs: 5000, exp: 120, outputs: { ore_jade: 1 } },
+    // —— 锻造·熔炼（2 矿 → 1 锭）——
+    { id: "smelt_copper", prof: "smithing", tier: 1, name: "熔炼铜锭",   levelReq: 1,  durationMs: 3000, exp: 9,   inputs: { ore_copper: 2 }, outputs: { ingot_copper: 1 } },
+    { id: "smelt_iron",   prof: "smithing", tier: 2, name: "熔炼铁锭",   levelReq: 10, durationMs: 3000, exp: 18,  inputs: { ore_iron: 2 },   outputs: { ingot_iron: 1 } },
+    { id: "smelt_xuan",   prof: "smithing", tier: 3, name: "熔炼玄铁锭", levelReq: 25, durationMs: 3500, exp: 36,  inputs: { ore_xuan: 2 },   outputs: { ingot_xuan: 1 } },
+    { id: "smelt_cold",   prof: "smithing", tier: 4, name: "熔炼寒铁锭", levelReq: 40, durationMs: 4000, exp: 58,  inputs: { ore_cold: 2 },   outputs: { ingot_cold: 1 } },
+    { id: "smelt_star",   prof: "smithing", tier: 5, name: "熔炼星陨锭", levelReq: 60, durationMs: 4500, exp: 85,  inputs: { ore_star: 2 },   outputs: { ingot_star: 1 } },
+    { id: "smelt_jade",   prof: "smithing", tier: 6, name: "熔炼玄晶锭", levelReq: 80, durationMs: 5000, exp: 128, inputs: { ore_jade: 2 },   outputs: { ingot_jade: 1 } },
+    // —— 锻造·打造神兵（锭 → 随机装备进背包，喂战斗/装备系统。背包满时打造品自动熔炼成碎银，不浪费工时）——
+    { id: "forge_gear_copper", prof: "smithing", tier: 2, name: "打造凡铁神兵", levelReq: 5,  durationMs: 6000, exp: 40,  inputs: { ingot_copper: 3 }, craftItem: 8 },
+    { id: "forge_gear_iron",   prof: "smithing", tier: 3, name: "打造精铁神兵", levelReq: 18, durationMs: 6500, exp: 65,  inputs: { ingot_iron: 3 },   craftItem: 16 },
+    { id: "forge_gear_xuan",   prof: "smithing", tier: 4, name: "打造玄铁神兵", levelReq: 32, durationMs: 7000, exp: 95,  inputs: { ingot_xuan: 3 },   craftItem: 28 },
+    { id: "forge_gear_cold",   prof: "smithing", tier: 5, name: "打造寒铁神兵", levelReq: 50, durationMs: 7500, exp: 130, inputs: { ingot_cold: 3 },   craftItem: 42 },
+    { id: "forge_gear_star",   prof: "smithing", tier: 6, name: "打造星陨神兵", levelReq: 68, durationMs: 8000, exp: 170, inputs: { ingot_star: 3 },   craftItem: 56 }
+];
