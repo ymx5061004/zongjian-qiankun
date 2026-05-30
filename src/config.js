@@ -64,6 +64,7 @@ export const epicStory = [
 export const BALANCE = {
     rebornMultPerCount: 0.6,          // 每次轮回的全属性乘区: 1 + rebornCount * 0.6
     honghuangMultPerLevel: 0.02,      // 洪荒之力每重的五维乘区: 1 + power * 0.02
+    dodgeCap: 75,                     // 闪避率硬上限(%)：避免堆到 100% 后战斗永不掉血、必胜无敌
 
     breakthrough: { costPerLevel: 400, hpGain: 80, atkGain: 18, defGain: 8 },
     reborn: { minLevel: 20, baseHp: 250, baseAtk: 35, baseDef: 15 },

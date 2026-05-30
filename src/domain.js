@@ -55,7 +55,7 @@ export function computeStats(player) {
         atk: Math.floor(calcAtk * hhMultiplier),
         def: Math.floor(calcDef * hhMultiplier),
         crit: parseFloat((calcCrit * hhMultiplier).toFixed(1)),
-        dodge: parseFloat((calcDodge * hhMultiplier).toFixed(1)),
+        dodge: parseFloat(Math.min(BALANCE.dodgeCap, calcDodge * hhMultiplier).toFixed(1)),
         dropRate: 100,
         coinRate: 100
     };
