@@ -7,7 +7,8 @@ import { BALANCE } from './config.js';
 import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
-    renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood
+    renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
+    skillBrief, skillDescText
 } from './ui/render.js';
 import { saveGame } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -178,8 +179,12 @@ export async function useBagItem(idx) {
     // 需在此看清自身属性，并补回桌面端 hover 才有的"与当前装备的 ▲▼ 对比"。
     let message;
     if (item.type === 'book') {
-        const desc = (item.payload && item.payload.desc) ? item.payload.desc : '江湖武学秘籍';
-        message = `<div style="color:#bbb;font-size:13px;line-height:1.6;margin-bottom:10px;">${desc}</div>请选择操作：`;
+        // 移动端点背包格直接进此弹窗（无 hover 详情卡），故在此补「类型(主动/被动/洪荒)+关键加成」摘要，与详情卡同源。
+        const p = item.payload || {};
+        const briefColor = p.isHongHuang ? 'var(--color-honghuang)' : (p.type === 'active' ? 'var(--color-orange)' : 'var(--color-blue)');
+        message =
+            `<div style="color:${briefColor};font-weight:bold;font-size:13px;margin-bottom:6px;">${skillBrief(p)}</div>` +
+            `<div style="color:#bbb;font-size:13px;line-height:1.6;margin-bottom:10px;">${skillDescText(p)}</div>请选择操作：`;
     } else {
         const fields = [
             { k: 'atk', n: '攻击' }, { k: 'def', n: '防御' }, { k: 'hp', n: '气血' },

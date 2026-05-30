@@ -84,9 +84,34 @@ const PASSIVE_ATTRS = [
     { k: 'coinRate', n: '碎银', c: 'var(--color-gold)', s: '%' }
 ];
 
-// 绝学详情卡（百修秘籍页 🔍）：按类型展示「每重加成」与「当前等级合计」。
+// 一行技能摘要（类型 + 关键加成）：背包操作弹窗 / 移动端点按用，与详情卡同源 BALANCE。
+export function skillBrief(sk) {
+    if (!sk) return '江湖武学秘籍';
+    if (sk.isHongHuang) return `洪荒法则 · 每重五维总量 +${BALANCE.honghuangMultPerLevel * 100}%`;
+    if (sk.type === 'active') {
+        const heal = sk.healRate ? ` · 吸血 ${Math.round(sk.healRate * 100)}%` : '';
+        return `主动招式 · ${sk.power || 0} 倍伤害（每重 +${BALANCE.battle.activeLevelScale}）${heal}`;
+    }
+    const parts = PASSIVE_ATTRS.filter(d => sk[d.k]).map(d => `${d.n}+${sk[d.k]}${d.s || ''}`);
+    return `被动功法 · 每重 ${parts.length ? parts.join('　') : '（详见功效）'}`;
+}
+
+// 把秘籍 desc 里的 [伤害]/[气血]… 占位符替换为实际数值（占位对应字段有值才替换，避免 undefined）。
+export function skillDescText(sk) {
+    if (!sk || !sk.desc) return '江湖武学秘籍';
+    let d = sk.desc.replace('[伤害]', sk.power);
+    if (sk.hp) d = d.replace('[气血]', sk.hp);
+    if (sk.atk) d = d.replace('[攻击]', sk.atk);
+    if (sk.def) d = d.replace('[防御]', sk.def);
+    if (sk.dodge) d = d.replace('[闪避]', sk.dodge);
+    if (sk.crit) d = d.replace('[暴击]', sk.crit);
+    return d;
+}
+
+// 绝学详情卡（百修秘籍页 🔍 / 行囊·黑市·洪炉里的秘籍书共用）：按类型展示「每重加成」与「当前等级合计」。
 // 倍率/暴击/概率等取自 BALANCE，确保与实战一致（不再用旧版 0.15 的显示近似值）。
-function generateSkillColumn(sk) {
+// opts.asBook=true：未学的书，把「修为进度」改为「研习上限」；opts.price：显示回收碎银。
+function generateSkillColumn(sk, opts = {}) {
     const B = BALANCE.battle;
     const isHH = sk.isHongHuang;
     const lv = sk.level || 1;
@@ -97,7 +122,12 @@ function generateSkillColumn(sk) {
     let html = `<div class="tooltip-column">`;
     html += `<div class="tooltip-title" style="color:${tColor}">《${sk.name}》</div>`;
     html += `<div class="tooltip-attr"><span>类型:</span><span style="color:${tColor}">${typeName}</span></div>`;
-    html += `<div class="tooltip-attr"><span>修为:</span><span style="color:var(--color-gold)">第 ${lv} / ${maxLevel} 重${lv >= maxLevel ? '（已满）' : ''}</span></div>`;
+    if (opts.asBook) {
+        html += `<div class="tooltip-attr"><span>研习上限:</span><span style="color:var(--color-gold)">${maxLevel} 重</span></div>`;
+    } else {
+        html += `<div class="tooltip-attr"><span>修为:</span><span style="color:var(--color-gold)">第 ${lv} / ${maxLevel} 重${lv >= maxLevel ? '（已满）' : ''}</span></div>`;
+    }
+    if (opts.price !== undefined) html += `<div class="tooltip-attr"><span>回收碎银:</span><span style="color:var(--color-gold)">${opts.price} 文</span></div>`;
     html += `<hr style="border:0; border-top:1px dashed #222; margin:6px 0;">`;
 
     if (isHH) {
@@ -122,15 +152,7 @@ function generateSkillColumn(sk) {
         });
     }
 
-    if (sk.desc) {
-        let desc = sk.desc.replace('[伤害]', sk.power);
-        if (sk.hp) desc = desc.replace('[气血]', sk.hp);
-        if (sk.atk) desc = desc.replace('[攻击]', sk.atk);
-        if (sk.def) desc = desc.replace('[防御]', sk.def);
-        if (sk.dodge) desc = desc.replace('[闪避]', sk.dodge);
-        if (sk.crit) desc = desc.replace('[暴击]', sk.crit);
-        html += `<div class="tooltip-desc" style="margin-top:6px;">${desc}</div>`;
-    }
+    if (sk.desc) html += `<div class="tooltip-desc" style="margin-top:6px;">${skillDescText(sk)}</div>`;
     html += `</div>`;
     return html;
 }
@@ -143,10 +165,11 @@ function buildTooltipHtml(target) {
 
     if (info.kind === 'skill') {
         finalHtml += generateSkillColumn(info.sk); // 百修秘籍页绝学详情，需先于 type 判断
+    } else if (info.type === "book") {
+        // 行囊/黑市/洪炉里的秘籍书：统一复用技能详情卡，明确标注主动/被动/洪荒类型（payload 即完整技能对象）
+        finalHtml += info.payload ? generateSkillColumn(info.payload, { price: info.price, asBook: true }) : generateHtmlColumn(info);
     } else if (isEquippedSlot || isForgeSlot) {
         finalHtml += generateHtmlColumn(info, "", isEquippedSlot);
-    } else if (info.type === "book") {
-        finalHtml += generateHtmlColumn(info);
     } else {
         const matchedEquip = state.player.equips[info.type];
         finalHtml += generateHtmlColumn(info, "👉 ", false);
@@ -346,7 +369,14 @@ export function renderBag() {
         if (item) {
             if (item.payload && item.payload.isHongHuang) slot.classList.add(`q-hh`);
             else if (item.quality !== undefined) slot.classList.add(`q-${item.quality}`);
-            slot.innerHTML = `<b>${item.name.split('·')[1]?.substring(0, 5) || item.name.substring(0, 5)}</b><br><span style="color:#555;font-size:9px;">${item.type === 'book' ? '书' : '装'}</span>`;
+            let tag = '装', tagColor = '#666';
+            if (item.type === 'book') {
+                const p = item.payload || {};
+                if (p.isHongHuang) { tag = '洪'; tagColor = 'var(--color-honghuang)'; }
+                else if (p.type === 'active') { tag = '主'; tagColor = 'var(--color-orange)'; }
+                else { tag = '被'; tagColor = 'var(--color-blue)'; }
+            }
+            slot.innerHTML = `<b>${item.name.split('·')[1]?.substring(0, 5) || item.name.substring(0, 5)}</b><br><span style="color:${tagColor};font-size:9px;">${tag}</span>`;
             slot.setAttribute('data-tip', JSON.stringify(item));
             slot.setAttribute('data-act', 'use-bag');
             slot.setAttribute('data-idx', String(i));
