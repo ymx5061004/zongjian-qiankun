@@ -701,12 +701,12 @@ export function renderDungeon() {
             </div>`;
         }).join('');
     }
-    // 神兵进阶（6 装备槽）+ 神魂结晶持有量
+    // 神兵进阶（已解锁装备槽）+ 神魂结晶持有量
     const upBox = document.getElementById('upgrade-slots');
     if (upBox) {
         const cry = player.materials.soul_crystal || 0;
         const head = `<div class="prof-exp-text" style="margin-bottom:10px;">持有 💎神魂结晶 ×${cry}。进阶把 ${GEAR_TIERS[MAX_CRAFTABLE_TIER - 1].name}档 装备突破到 神话→仙器（打造造不出的档），保留成色与强化。</div>`;
-        upBox.innerHTML = head + ENHANCE_SLOTS.map(([slot, label]) => {
+        upBox.innerHTML = head + unlockedGearSlots(player.realmLevel).map(({ key: slot, label }) => {
             const it = player.equips[slot];
             if (!it) return `<div class="act-card locked"><div class="act-head"><span class="act-title">【${label}】</span><span style="color:var(--text-muted);font-size:12px;">— 未装备 —</span></div></div>`;
             const tierName = (it.tier && GEAR_TIERS[it.tier - 1]) ? GEAR_TIERS[it.tier - 1].name : '杂项';
