@@ -73,13 +73,77 @@ function generateDiffColumn(curItem, eqItem) {
     return html;
 }
 
+// 被动功法可叠加的属性（k=字段, n=名称, c=配色, s=后缀）。秘籍列表与详情卡共用，避免两处漂移。
+const PASSIVE_ATTRS = [
+    { k: 'hp', n: '气血', c: 'var(--color-success)' },
+    { k: 'atk', n: '攻击', c: 'var(--color-accent)' },
+    { k: 'def', n: '防御', c: 'var(--color-blue)' },
+    { k: 'dodge', n: '闪避', c: 'var(--color-success)', s: '%' },
+    { k: 'crit', n: '暴击', c: 'var(--color-orange)', s: '%' },
+    { k: 'dropRate', n: '掉宝', c: 'var(--color-gold)', s: '%' },
+    { k: 'coinRate', n: '碎银', c: 'var(--color-gold)', s: '%' }
+];
+
+// 绝学详情卡（百修秘籍页 🔍）：按类型展示「每重加成」与「当前等级合计」。
+// 倍率/暴击/概率等取自 BALANCE，确保与实战一致（不再用旧版 0.15 的显示近似值）。
+function generateSkillColumn(sk) {
+    const B = BALANCE.battle;
+    const isHH = sk.isHongHuang;
+    const lv = sk.level || 1;
+    const maxLevel = isHH ? BALANCE.skill.hhMaxLevel : BALANCE.skill.normalMaxLevel;
+    const typeName = isHH ? '洪荒法则' : (sk.type === 'active' ? '主动招式' : '被动功法');
+    const tColor = isHH ? 'var(--color-honghuang)' : (sk.type === 'active' ? 'var(--color-orange)' : 'var(--color-blue)');
+
+    let html = `<div class="tooltip-column">`;
+    html += `<div class="tooltip-title" style="color:${tColor}">《${sk.name}》</div>`;
+    html += `<div class="tooltip-attr"><span>类型:</span><span style="color:${tColor}">${typeName}</span></div>`;
+    html += `<div class="tooltip-attr"><span>修为:</span><span style="color:var(--color-gold)">第 ${lv} / ${maxLevel} 重${lv >= maxLevel ? '（已满）' : ''}</span></div>`;
+    html += `<hr style="border:0; border-top:1px dashed #222; margin:6px 0;">`;
+
+    if (isHH) {
+        html += `<div class="tooltip-attr"><span>每重:</span><span style="color:var(--color-honghuang)">洪荒之力 +1%（五维总量 +2%）</span></div>`;
+        html += `<div class="tooltip-attr"><span>当前 ${lv} 重:</span><span style="color:var(--color-honghuang)">洪荒之力 +${lv}% · 五维总量 +${lv * 2}%</span></div>`;
+    } else if (sk.type === 'active') {
+        const cur = (sk.power || 0) + lv * B.activeLevelScale;
+        html += `<div class="tooltip-attr"><span>基础倍率:</span><span>${sk.power || 0} 倍</span></div>`;
+        html += `<div class="tooltip-attr"><span>每重:</span><span style="color:var(--color-success)">+${B.activeLevelScale} 倍</span></div>`;
+        html += `<div class="tooltip-attr"><span>当前 ${lv} 重:</span><span style="color:var(--color-orange)">${cur.toFixed(2)} 倍伤害</span></div>`;
+        html += `<div class="tooltip-attr"><span>暴击时:</span><span style="color:var(--color-orange)">再 ×${B.critMult}</span></div>`;
+        if (sk.healRate) html += `<div class="tooltip-attr"><span>吸血:</span><span style="color:var(--color-success)">伤害的 ${Math.round(sk.healRate * 100)}%</span></div>`;
+        // 实战：每回合 activeSkillChance 触发后，从所有主动技中等概率随机择一；故单招真实概率 = 0.4 / 主动技数
+        const activeCount = state.player.skills.filter(s => s.type === 'active').length || 1;
+        const perSkillPct = Math.round(B.activeSkillChance / activeCount * 100);
+        html += `<div style="font-size:11px;color:#777;margin-top:5px;">战斗中每回合约 ${perSkillPct}% 概率施展${activeCount > 1 ? `（共 ${activeCount} 门主动技随机择一）` : ''}</div>`;
+    } else {
+        const rows = PASSIVE_ATTRS.filter(d => sk[d.k]);
+        if (!rows.length) html += `<div style="color:#777;font-size:12px;">（无直接五维加成，详见下方功效）</div>`;
+        rows.forEach(d => {
+            html += `<div class="tooltip-attr"><span>${d.n}:</span><span style="color:${d.c}">每重 +${sk[d.k]}${d.s || ''} · 当前 +${sk[d.k] * lv}${d.s || ''}</span></div>`;
+        });
+    }
+
+    if (sk.desc) {
+        let desc = sk.desc.replace('[伤害]', sk.power);
+        if (sk.hp) desc = desc.replace('[气血]', sk.hp);
+        if (sk.atk) desc = desc.replace('[攻击]', sk.atk);
+        if (sk.def) desc = desc.replace('[防御]', sk.def);
+        if (sk.dodge) desc = desc.replace('[闪避]', sk.dodge);
+        if (sk.crit) desc = desc.replace('[暴击]', sk.crit);
+        html += `<div class="tooltip-desc" style="margin-top:6px;">${desc}</div>`;
+    }
+    html += `</div>`;
+    return html;
+}
+
 function buildTooltipHtml(target) {
     const info = JSON.parse(target.getAttribute('data-tip'));
     const isEquippedSlot = target.id && target.id.startsWith("slot-container-");
     const isForgeSlot = target.id && target.id.startsWith("forge-slot-");
     let finalHtml = `<div class="tooltip-container">`;
 
-    if (isEquippedSlot || isForgeSlot) {
+    if (info.kind === 'skill') {
+        finalHtml += generateSkillColumn(info.sk); // 百修秘籍页绝学详情，需先于 type 判断
+    } else if (isEquippedSlot || isForgeSlot) {
         finalHtml += generateHtmlColumn(info, "", isEquippedSlot);
     } else if (info.type === "book") {
         finalHtml += generateHtmlColumn(info);
@@ -309,15 +373,17 @@ export function renderPlayerSkills() {
         let eff = "";
         if (isHH) {
             card.style.border = "1px solid rgba(255,51,102,0.3)";
-            eff = `<span style="color:var(--color-honghuang)">当前引发老区长的洪荒之力 +${sk.level}% （五维核心属性总量增幅 +${sk.level * 2}%）</span>`;
+            eff = `<span style="color:var(--color-honghuang)">洪荒之力 +${sk.level}%（五维总量 +${sk.level * 2}%）</span>`;
         } else if (sk.type === "active") {
-            // 注意：此处显示倍率用 0.15/级，与战斗实际 0.18/级(BALANCE.battle.activeLevelScale)不同——沿用原版，未擅改。
-            eff = `主战招式：造成 ${(sk.power + (sk.level * 0.15)).toFixed(1)} 倍爆发伤害。`;
+            const cur = ((sk.power || 0) + sk.level * BALANCE.battle.activeLevelScale).toFixed(2);
+            eff = `主战招式 · 当前 ${cur} 倍伤害${sk.healRate ? ` · 吸血 ${Math.round(sk.healRate * 100)}%` : ''}`;
         } else {
-            eff = `功法被动：气血+${sk.hp * sk.level} 攻击+${sk.atk * sk.level} 防御+${sk.def * sk.level}`;
+            const parts = PASSIVE_ATTRS.filter(d => sk[d.k]).map(d => `${d.n}+${sk[d.k] * sk.level}${d.s || ''}`);
+            eff = `功法被动 · ${parts.length ? parts.join('　') : '点 🔍 查看功效'}`;
         }
 
-        card.innerHTML = `<div><strong class="${isHH ? 'q-hh' : ''}">《${sk.name}》 <span style="color:var(--color-gold);">[第${sk.level}/${maxLevel}重]</span></strong><br><small style="color:var(--text-muted)">${eff}</small></div><button class="btn" ${sk.level >= maxLevel ? 'disabled' : ''} data-act="upgrade-skill" data-idx="${index}">${sk.level >= maxLevel ? '已至化境' : `潜心研习(耗${formatNumber(cost)}修为)`}</button>`;
+        const tip = tipAttr({ kind: 'skill', sk }); // 详情卡数据；tipAttr 转义单引号，避免洪荒 desc 截断属性
+        card.innerHTML = `<div><span data-tip='${tip}' style="cursor:help;"><strong class="${isHH ? 'q-hh' : ''}">《${sk.name}》 🔍</strong></span> <span style="color:var(--color-gold);">[第${sk.level}/${maxLevel}重]</span><br><small style="color:var(--text-muted)">${eff}</small></div><button class="btn" ${sk.level >= maxLevel ? 'disabled' : ''} data-act="upgrade-skill" data-idx="${index}">${sk.level >= maxLevel ? '已至化境' : `潜心研习(耗${formatNumber(cost)}修为)`}</button>`;
         box.appendChild(card);
     });
 }
