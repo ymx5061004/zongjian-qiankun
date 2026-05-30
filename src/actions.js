@@ -8,7 +8,7 @@ import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllG
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
-    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse, renderBagExpand
+    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse, renderBagExpand, renderPills
 } from './ui/render.js';
 import { saveGame, exportSaveString, importSaveString } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -544,4 +544,22 @@ export async function importSaveFile(file) {
     saveGame();              // 落盘新存档（顺带刷新 lastTickTime，重载后不会误判离线）
     toast('✅ 存档已导入，正在重载…', 'success');
     setTimeout(() => location.reload(), 600); // 重载让 init 全量重渲，零残留旧状态
+}
+
+// —— 服用丹药：扣 1 颗，永久累加 pillBonus(跨轮回保留)，刷新属性与丹房 ——
+const PILL_LABEL = { hp: '气血', atk: '攻击', def: '防御', crit: '暴击', dodge: '闪避' };
+export function takePill(key) {
+    const player = state.player;
+    const m = MATERIALS[key];
+    if (!m || !m.pill) return;
+    if ((player.materials[key] || 0) <= 0) { toast("没有这种丹药。", 'error'); return; }
+    player.materials[key]--;
+    if (player.materials[key] <= 0) delete player.materials[key];
+    if (!player.pillBonus) player.pillBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
+    for (const [k, v] of Object.entries(m.pill)) player.pillBonus[k] = (player.pillBonus[k] || 0) + v;
+    renderPills();
+    updatePlayerAttributes();
+    saveGame();
+    const eff = Object.entries(m.pill).map(([k, v]) => `${PILL_LABEL[k]}+${v}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('、');
+    toast(`服下【${m.name}】，永久 ${eff}！`, 'success');
 }

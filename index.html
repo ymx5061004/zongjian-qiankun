@@ -49,6 +49,8 @@
                 <div class="menu-items">
                     <button class="menu-item" data-act="switch-page" data-page="mining"><span class="menu-icon">⛏️</span>采矿</button>
                     <button class="menu-item" data-act="switch-page" data-page="smithing"><span class="menu-icon">🔨</span>锻造</button>
+                    <button class="menu-item" data-act="switch-page" data-page="herb"><span class="menu-icon">🌿</span>采药</button>
+                    <button class="menu-item" data-act="switch-page" data-page="alchemy"><span class="menu-icon">⚗️</span>炼丹</button>
                     <button class="menu-item" data-act="switch-page" data-page="craft"><span class="menu-icon">🛡️</span>打造</button>
                     <button class="menu-item" data-act="switch-page" data-page="enhance"><span class="menu-icon">⚒️</span>强化</button>
                 </div>
@@ -262,6 +264,36 @@
             <div class="sub-panel">
                 <div class="panel-title">📦 物料仓库</div>
                 <div class="scroll-box" id="warehouse-smithing"></div>
+            </div>
+        </div>
+
+        <div id="page-herb" class="page">
+            <div class="sub-panel">
+                <div class="panel-title">🌿 采药 · <span id="herb-level" style="color:var(--color-success);">Lv.1</span></div>
+                <div class="prof-bar-wrap"><div class="prof-bar-inner" id="herb-exp-bar"></div></div>
+                <div class="prof-exp-text" id="herb-exp-text"></div>
+                <div class="scroll-box" id="herb-list"></div>
+            </div>
+            <div class="sub-panel">
+                <div class="panel-title">📦 物料仓库</div>
+                <div class="scroll-box" id="warehouse-herb"></div>
+            </div>
+        </div>
+
+        <div id="page-alchemy" class="page">
+            <div class="sub-panel">
+                <div class="panel-title">⚗️ 炼丹 · <span id="alchemy-level" style="color:var(--color-success);">Lv.1</span></div>
+                <div class="prof-bar-wrap"><div class="prof-bar-inner" id="alchemy-exp-bar"></div></div>
+                <div class="prof-exp-text" id="alchemy-exp-text"></div>
+                <div class="scroll-box" id="alchemy-list"></div>
+            </div>
+            <div class="sub-panel">
+                <div class="panel-title">💊 丹房 · 服用永久增益</div>
+                <div class="scroll-box" id="pill-box"></div>
+            </div>
+            <div class="sub-panel">
+                <div class="panel-title">📦 物料仓库（草药）</div>
+                <div class="scroll-box" id="warehouse-alchemy"></div>
             </div>
         </div>
 

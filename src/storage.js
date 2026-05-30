@@ -5,7 +5,7 @@
 // 仅作防篡改/防随手改档的混淆 —— 密钥就在前端源码里，非机密级保护。
 // ============================================================
 import { state, makeDefaultPlayer } from './state.js';
-import { SKILL_SUFFIXES, GEAR_SLOTS } from './config.js';
+import { SKILL_SUFFIXES, GEAR_SLOTS, PROFESSIONS } from './config.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
 const SAVE_VERSION = 3;
@@ -33,9 +33,12 @@ export function normalizePlayer(parsed) {
     // 生产体系字段防御性补全（v3 新增；data 整体覆盖了默认对象，故逐项兜底，将来加新技能也在此补键）
     const p = player;
     if (!p.professions || typeof p.professions !== 'object') p.professions = {};
-    // 校验到 exp 必须是有限数：旧档/损坏档里 professions[k] 缺 exp 会让后续 exp+= 变 NaN
-    ['mining', 'smithing'].forEach(k => { if (!p.professions[k] || !Number.isFinite(p.professions[k].exp)) p.professions[k] = { exp: 0 }; });
+    // 校验到 exp 必须是有限数：旧档/损坏档里 professions[k] 缺 exp 会让后续 exp+= 变 NaN（遍历 PROFESSIONS：将来加技能也自动补）
+    Object.keys(PROFESSIONS).forEach(k => { if (!p.professions[k] || !Number.isFinite(p.professions[k].exp)) p.professions[k] = { exp: 0 }; });
     if (!p.materials || typeof p.materials !== 'object') p.materials = {};
+    // 丹药永久增益：旧档无则补零（跨轮回保留，不被 reborn 重置）
+    if (!p.pillBonus || typeof p.pillBonus !== 'object') p.pillBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
+    ['hp', 'atk', 'def', 'crit', 'dodge'].forEach(k => { if (!Number.isFinite(p.pillBonus[k])) p.pillBonus[k] = 0; });
     // 装备槽防御性补全：旧档 equips 缺新部位键(amulet/gloves/boots…)时补 null，避免读取/渲染时的边界
     if (!p.equips || typeof p.equips !== 'object') p.equips = {};
     GEAR_SLOTS.forEach(s => { if (!(s.key in p.equips)) p.equips[s.key] = null; });

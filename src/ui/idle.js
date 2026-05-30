@@ -38,7 +38,7 @@ function hasInputs(player, act) {
 // 当前是否停留在生产页（采矿/锻造）——决定 tick 要不要重绘面板。
 // 挂机允许后台跑(逛别的页时不该停)，但隐藏页无需重绘，省开销。
 function isProductionPageVisible() {
-    return ['page-mining', 'page-smithing'].some(id => {
+    return ['page-mining', 'page-smithing', 'page-herb', 'page-alchemy'].some(id => {
         const el = document.getElementById(id);
         return el && el.classList.contains('active');
     });

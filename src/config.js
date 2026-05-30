@@ -253,7 +253,9 @@ export const COMBAT_AFFIX_KEYS = COMBAT_AFFIXES.map(a => a.k);
 // ============================================================
 export const PROFESSIONS = {
     mining:   { name: "采矿", icon: "⛏️", desc: "开采各色矿石，为锻造与炼器供给原料。" },
-    smithing: { name: "锻造", icon: "🔨", desc: "将矿石熔炼成锭，再以锭打造神兵利器。" }
+    smithing: { name: "锻造", icon: "🔨", desc: "将矿石熔炼成锭，再以锭打造神兵利器。" },
+    herb:     { name: "采药", icon: "🌿", desc: "采集天材地宝，为炼丹供给草药。" },
+    alchemy:  { name: "炼丹", icon: "⚗️", desc: "以草药炼制丹药，服之永久增益根骨。" }
 };
 
 // 可堆叠物料（存 player.materials = { key: 数量 }）。price 为单个回收/出售价（文）。
@@ -270,7 +272,18 @@ export const MATERIALS = {
     ingot_cold:   { name: "寒铁锭", icon: "🧊", price: 380 },
     ingot_star:   { name: "星陨锭", icon: "✴️", price: 800 },
     ingot_jade:   { name: "玄晶锭", icon: "💠", price: 1700 },
-    soul_crystal: { name: "神魂结晶", icon: "💎", price: 0 }   // 仅秘境 Boss 掉落，用于「神兵进阶」突破打造天花板(T6→神话→仙器)
+    soul_crystal: { name: "神魂结晶", icon: "💎", price: 0 },   // 仅秘境 Boss 掉落，用于「神兵进阶」突破打造天花板(T6→神话→仙器)
+    // —— 草药（采药产出，炼丹原料）——
+    herb_1: { name: "三叶青草", icon: "🌱", price: 10 },
+    herb_2: { name: "九叶灵芝", icon: "🍀", price: 40 },
+    herb_3: { name: "万年雪参", icon: "🌾", price: 120 },
+    // —— 丹药（炼丹产出；带 pill 增益标记 → 不入物料仓库列表，改在炼丹页「丹房」服用，服后永久 +pillBonus）——
+    pill_atk1:  { name: "淬体丹", icon: "🔴", price: 0, pill: { atk: 8 } },
+    pill_hp1:   { name: "聚元丹", icon: "🟠", price: 0, pill: { hp: 50 } },
+    pill_def1:  { name: "玄龟丹", icon: "🟤", price: 0, pill: { def: 6 } },
+    pill_crit:  { name: "锐金丹", icon: "🟡", price: 0, pill: { crit: 1 } },
+    pill_dodge: { name: "轻灵丹", icon: "🟢", price: 0, pill: { dodge: 1 } },
+    pill_great: { name: "大还丹", icon: "🟣", price: 0, pill: { hp: 120, atk: 15, def: 10 } }
 };
 
 // 挂机动作表。字段：
@@ -296,6 +309,18 @@ export const ACTIVITIES = [
     // 锭的两大出口 = ①打造命名套装(GEAR_TIERS + actions.craftGear) ②强化已装备的神兵(BALANCE.enhance + actions.enhanceEquip)。
     // 二者共享锭产能，需平衡(数值待试玩调)。黑市买不到、战斗爆不出的垂直变强轴=自己挖矿熔炼。
     // (通用引擎仍支持 craftItem 类动作，暂未启用，保留备用。)
+
+    // —— 采药（无消耗，纯产草药；供炼丹）——
+    { id: "gather_herb1", prof: "herb", tier: 1, name: "采三叶青草", levelReq: 1,  durationMs: 3000, exp: 7,  outputs: { herb_1: 1 } },
+    { id: "gather_herb2", prof: "herb", tier: 2, name: "采九叶灵芝", levelReq: 20, durationMs: 4000, exp: 38, outputs: { herb_2: 1 } },
+    { id: "gather_herb3", prof: "herb", tier: 3, name: "采万年雪参", levelReq: 45, durationMs: 5000, exp: 85, outputs: { herb_3: 1 } },
+    // —— 炼丹（草药 → 丹药；产物带 pill 增益，在「丹房」服用永久增益根骨）——
+    { id: "brew_atk1",  prof: "alchemy", tier: 1, name: "炼·淬体丹", levelReq: 1,  durationMs: 4000, exp: 10, inputs: { herb_1: 3 }, outputs: { pill_atk1: 1 } },
+    { id: "brew_hp1",   prof: "alchemy", tier: 1, name: "炼·聚元丹", levelReq: 1,  durationMs: 4000, exp: 10, inputs: { herb_1: 3 }, outputs: { pill_hp1: 1 } },
+    { id: "brew_def1",  prof: "alchemy", tier: 1, name: "炼·玄龟丹", levelReq: 8,  durationMs: 4500, exp: 14, inputs: { herb_1: 3 }, outputs: { pill_def1: 1 } },
+    { id: "brew_crit",  prof: "alchemy", tier: 2, name: "炼·锐金丹", levelReq: 20, durationMs: 5000, exp: 30, inputs: { herb_2: 4 }, outputs: { pill_crit: 1 } },
+    { id: "brew_dodge", prof: "alchemy", tier: 2, name: "炼·轻灵丹", levelReq: 30, durationMs: 5000, exp: 40, inputs: { herb_2: 4 }, outputs: { pill_dodge: 1 } },
+    { id: "brew_great", prof: "alchemy", tier: 3, name: "炼·大还丹", levelReq: 50, durationMs: 6000, exp: 80, inputs: { herb_3: 6 }, outputs: { pill_great: 1 } }
 ];
 
 // ============================================================

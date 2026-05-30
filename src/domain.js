@@ -60,11 +60,13 @@ export function enhanceCost(item) {
 export function computeStats(player) {
     const rebornMult = 1 + player.rebornCount * BALANCE.rebornMultPerCount;
 
-    let calcHp = Math.floor(player.baseHp * rebornMult);
-    let calcAtk = Math.floor(player.baseAtk * rebornMult);
-    let calcDef = Math.floor(player.baseDef * rebornMult);
-    let calcCrit = player.baseCrit;
-    let calcDodge = player.baseDodge;
+    // 丹药永久增益(pillBonus)与基础值同层：攻防血吃轮回乘区(根骨厚→修炼放大)，暴击/闪避同 base 不乘
+    const pill = player.pillBonus || {};
+    let calcHp = Math.floor((player.baseHp + (pill.hp || 0)) * rebornMult);
+    let calcAtk = Math.floor((player.baseAtk + (pill.atk || 0)) * rebornMult);
+    let calcDef = Math.floor((player.baseDef + (pill.def || 0)) * rebornMult);
+    let calcCrit = player.baseCrit + (pill.crit || 0);
+    let calcDodge = player.baseDodge + (pill.dodge || 0);
 
     player.skills.forEach(sk => {
         if (sk.type === 'passive') {

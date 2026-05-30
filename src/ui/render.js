@@ -552,7 +552,7 @@ export function renderProduction() {
 // 渲染物料仓库（采矿/锻造两页各有一个容器，内容相同：列出所有持有量>0 的物料）。
 export function renderWarehouse() {
     const player = state.player;
-    const keys = Object.keys(MATERIALS).filter(k => (player.materials[k] || 0) > 0);
+    const keys = Object.keys(MATERIALS).filter(k => (player.materials[k] || 0) > 0 && !MATERIALS[k].pill); // 丹药不入仓库(改在丹房服用)
     const html = keys.length
         ? `<div class="wh-grid">` + keys.map(k => {
             const qty = player.materials[k], price = MATERIALS[k].price || 0;
@@ -560,10 +560,37 @@ export function renderWarehouse() {
             return `<div class="wh-item"><div class="wh-ico">${MATERIALS[k].icon}</div>${MATERIALS[k].name}<br><span class="wh-qty">${formatNumber(qty)}</span>${sell}</div>`;
         }).join('') + `</div>`
         : `<div class="wh-empty">— 仓库空空如也，去采矿 / 熔炼积攒物料吧 —</div>`;
-    ['warehouse-mining', 'warehouse-smithing'].forEach(id => {
+    ['warehouse-mining', 'warehouse-smithing', 'warehouse-herb', 'warehouse-alchemy'].forEach(id => {
         const box = document.getElementById(id);
         if (box) box.innerHTML = html;
     });
+}
+
+// 丹房：列已炼丹药(materials 里带 pill 标记者) + 服用按钮，并显示当前永久根骨增益累计。
+const PILL_STAT_LABEL = { hp: '气血', atk: '攻击', def: '防御', crit: '暴击', dodge: '闪避' };
+function pillEffStr(bonus) {
+    return Object.entries(bonus).map(([k, v]) => `${PILL_STAT_LABEL[k]}+${v}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('、');
+}
+export function renderPills() {
+    const box = document.getElementById('pill-box');
+    if (!box) return;
+    const player = state.player;
+    const pb = player.pillBonus || {};
+    const cur = Object.keys(PILL_STAT_LABEL).filter(k => pb[k]).map(k => `${PILL_STAT_LABEL[k]}+${pb[k]}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('　') || '尚无';
+    const head = `<div class="prof-exp-text" style="margin-bottom:10px;">当前丹药永久根骨：<b style="color:var(--color-gold)">${cur}</b>（跨轮回保留）</div>`;
+    const pillKeys = Object.keys(MATERIALS).filter(k => MATERIALS[k].pill && (player.materials[k] || 0) > 0);
+    if (!pillKeys.length) {
+        box.innerHTML = head + `<div class="wh-empty">— 暂无丹药。去左侧「炼丹」炼制，丹成后在此服用 —</div>`;
+        return;
+    }
+    box.innerHTML = head + pillKeys.map(k => {
+        const m = MATERIALS[k], qty = player.materials[k];
+        return `<div class="act-card">
+            <div class="act-head"><span class="act-title">${m.icon} ${m.name} ×${formatNumber(qty)}</span>
+                <button class="btn btn-success" data-act="take-pill" data-key="${k}">服用</button></div>
+            <div class="act-meta">服后永久 ${pillEffStr(m.pill)}</div>
+        </div>`;
+    }).join('');
 }
 
 // ---------- 神兵强化页（用锭+碎银强化已装备的装备）----------
@@ -728,6 +755,7 @@ export function switchPage(pageId, tabEl) {
     if (pageId === 'bag') { renderForge(); renderBag(); } // renderBag：补刷挂机期间打造入袋的装备
     if (pageId === 'guide') renderGuide();
     if (pageId === 'mining' || pageId === 'smithing') { renderProduction(); renderWarehouse(); }
+    if (pageId === 'herb' || pageId === 'alchemy') { renderProduction(); renderWarehouse(); if (pageId === 'alchemy') renderPills(); }
     if (pageId === 'enhance') renderEnhance();
     if (pageId === 'craft') renderCraft();
     if (pageId === 'dungeon') renderDungeon();

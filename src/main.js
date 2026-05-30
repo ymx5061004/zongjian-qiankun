@@ -22,7 +22,7 @@ import {
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
     enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
-    exportSaveFile, importSaveFile, buyBagSlot
+    exportSaveFile, importSaveFile, buyBagSlot, takePill
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -110,6 +110,7 @@ function onDelegatedClick(e) {
         case 'challenge-boss': challengeBoss(el.dataset.boss); break;
         case 'upgrade-gear': upgradeGear(el.dataset.slot); break;
         case 'sell-material': sellMaterial(el.dataset.key); break;
+        case 'take-pill': takePill(el.dataset.key); break;
         case 'stop-hangup': stopHangup(); break;
         case 'hangup': stopActivity(); startHangup(Number(el.dataset.map)); break;   // 开战前先停生产（二者互斥）
         case 'start-activity': stopHangup(); startActivity(el.dataset.id); break;     // 开工前先停战斗
