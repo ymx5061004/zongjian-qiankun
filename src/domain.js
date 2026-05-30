@@ -244,6 +244,19 @@ export function gearUpgradeCost(item) {
     return { nextTier: next, crystal, coin };
 }
 
+// —— 背包扩容下一格花费（梅尔沃 Bank Slot 式：+1格/次，几何递增）——
+// 入参当前 bagMax，返回 { cost, addSlots, nextMax }；已达上限返回 null。
+// 已扩次数 n = bagMax - base（step=1），单价 = round(priceStart * growth^n / 100)*100。
+// 老存档 bagMax 已是 96 → n=80≥可扩范围 → 直接返回 null(已满级)，天然兼容、不缩水。
+export function bagExpandCost(bagMax) {
+    const B = BALANCE.bag;
+    if (!Number.isFinite(bagMax) || bagMax >= B.max) return null; // 已满 / 非法
+    const n = Math.max(0, Math.round(bagMax - B.base));           // 已扩次数（每次+1）
+    const raw = B.priceStart * Math.pow(B.priceGrowth, n);
+    const cost = Math.max(B.priceStart, Math.round(raw / 100) * 100); // 取整到百，且不低于首格价
+    return { cost, addSlots: 1, nextMax: bagMax + 1 };
+}
+
 // —— 随机秘籍生成（价格随境界）——
 export function generateSkillByMatrix(realmLevel) {
     const suff = SKILL_SUFFIXES[Math.floor(Math.random() * SKILL_SUFFIXES.length)];

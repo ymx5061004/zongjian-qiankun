@@ -11,7 +11,7 @@ export function makeDefaultPlayer() {
         baseHp: 250, baseAtk: 35, baseDef: 15, baseCrit: 5, baseDodge: 5,
         honghuangPower: 0,
         equips: { weapon: null, subweapon: null, armor: null, helm: null, ring: null, artifact: null },
-        bag: [], bagMax: 96,
+        bag: [], bagMax: 16,           // 默认16格；扩容靠黑市常驻购买（见 BALANCE.bag / domain.bagExpandCost）
         skills: [],
         currentMapId: null,
         // —— 生产/挂机 ——

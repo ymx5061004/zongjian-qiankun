@@ -185,6 +185,16 @@ export const BALANCE = {
         armorPenCap: 75,          // 破甲上限%(无视敌防)
         dmgReductionCap: 75,      // 减伤上限%
         blockCap: 75              // 格挡率上限%
+    },
+
+    // —— 背包扩容（默认16格，黑市常驻购买，每次+1格、几何递增「偏贵·后期奢侈」）——
+    // n=已扩次数(=bagMax-base)；单次价 = round(priceStart * priceGrowth^n / 100)*100。
+    // 调手感只动这4个数：base起步 / max上限 / priceStart首格价 / priceGrowth每格涨幅。
+    bag: {
+        base: 16,                 // 新角色初始格数（老存档保留各自 bagMax，不缩水）
+        max: 120,                 // 扩容上限
+        priceStart: 2000,         // 第1次扩容(16→17)价(文)
+        priceGrowth: 1.08         // 每多扩1格单价 ×1.08（首格2000→末格约554万，全程约7480万）
     }
 };
 

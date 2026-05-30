@@ -5,7 +5,7 @@
 // ============================================================
 import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost } from '../domain.js';
 import { formatNumber } from '../util.js';
 
 // 装备 6 部位键与中文名（打造/强化/黑市/对比共用）
@@ -377,6 +377,26 @@ export function renderShopGoods() {
     });
 }
 
+// ---------- 黑市常驻：行囊扩容（梅尔沃 Bank Slot 式，不随刷新售罄）----------
+export function renderBagExpand() {
+    const box = document.getElementById('bag-expand-box');
+    if (!box) return;
+    const player = state.player;
+    const info = bagExpandCost(player.bagMax);
+    if (!info) { // 已达上限
+        box.innerHTML = `<div class="list-card" style="justify-content:space-between;">
+            <span>🎒 行囊容量 <b class="q-5">${player.bagMax}</b> 格</span>
+            <span style="color:var(--color-gold);">已扩至上限</span>
+        </div>`;
+        return;
+    }
+    const afford = player.coin >= info.cost;
+    box.innerHTML = `<div class="list-card" style="justify-content:space-between;">
+        <span>🎒 行囊容量 <b style="color:var(--color-gold);">${player.bagMax}</b> / ${BALANCE.bag.max} 格 —— 再 +${info.addSlots} 格</span>
+        <button class="btn btn-success" data-act="buy-bag-slot"${afford ? '' : ' disabled style="opacity:.5;"'}>扩容 (${formatNumber(info.cost)}文)</button>
+    </div>`;
+}
+
 // ---------- 天地洪炉两槽 ----------
 export function renderForge() {
     const forgeItems = state.forgeItems;
@@ -695,7 +715,7 @@ export function switchPage(pageId, tabEl) {
     closeMenu();   // 移动端：点菜单项后收起抽屉
     if (pageId === 'role' || pageId === 'bag') updatePlayerAttributes();
     if (pageId === 'kungfu') renderPlayerSkills();
-    if (pageId === 'shop') renderShopGoods();
+    if (pageId === 'shop') { renderBagExpand(); renderShopGoods(); }
     if (pageId === 'adventure') renderMapList();
     if (pageId === 'bag') { renderForge(); renderBag(); } // renderBag：补刷挂机期间打造入袋的装备
     if (pageId === 'guide') renderGuide();

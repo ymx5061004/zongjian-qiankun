@@ -4,11 +4,11 @@
 // ============================================================
 import { state } from './state.js';
 import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost } from './domain.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
-    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse
+    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse, renderBagExpand
 } from './ui/render.js';
 import { saveGame, exportSaveString, importSaveString } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -53,7 +53,7 @@ export function buyShopItem(idx) {
     if (!good || good.kind !== 'item') return;
     const itemObj = good.obj;
     if (player.coin < itemObj.price) { toast("碎银不足！", 'error'); return; }
-    if (player.bag.length >= player.bagMax) { toast("背包空间已满。", 'error'); return; }
+    if (player.bag.length >= player.bagMax) { toast("背包已满，可在本黑市「行囊扩容」加格。", 'error'); return; }
     player.coin -= itemObj.price;
     player.bag.push(itemObj);
     removeShopGood(idx);          // 只移除买走的这件，其余货保留（不再整架重随机）
@@ -70,7 +70,7 @@ export function buyShopSkill(idx) {
     if (!good || good.kind !== 'skill') return;
     const skObj = good.obj;
     if (player.coin < skObj.price) { toast("银两不足。", 'error'); return; }
-    if (player.bag.length >= player.bagMax) { toast("行囊空间已满。", 'error'); return; }
+    if (player.bag.length >= player.bagMax) { toast("行囊已满，可在本黑市「行囊扩容」加格。", 'error'); return; }
     player.coin -= skObj.price;
     player.bag.push({
         id: "bk_" + Date.now(),
@@ -96,6 +96,21 @@ export function refreshShop() {
     updatePlayerAttributes();
     saveGame();
     toast(`已消耗 ${cost} 文，黑市新进了一批货。`, 'success');
+}
+
+// —— 黑市常驻：花碎银买 1 格背包扩容（梅尔沃 Bank Slot 式，价随已扩次数几何递增）——
+export function buyBagSlot() {
+    const player = state.player;
+    const info = bagExpandCost(player.bagMax);
+    if (!info) { toast("行囊已扩至上限。", 'error'); return; }
+    if (player.coin < info.cost) { toast(`碎银不足：扩容此格需 ${formatNumber(info.cost)} 文。`, 'error'); return; }
+    player.coin -= info.cost;
+    player.bagMax += info.addSlots;
+    renderBagExpand();         // 刷新扩容卡（新容量 + 下一格新价）
+    renderBag();               // 背包多出空格子
+    updatePlayerAttributes();  // 顶栏碎银
+    saveGame();
+    toast(`🎒 行囊扩容 +${info.addSlots}！当前 ${player.bagMax} 格。`, 'success');
 }
 
 // —— 洪炉：取出 / 合成 ——
@@ -350,7 +365,7 @@ export function craftGear(tier, slot) {
     if (!T) return;
     const smLv = levelFromExp(player.professions.smithing.exp);
     if (smLv < T.smithingReq) { toast(`需【锻造】${T.smithingReq} 级才能打造 ${T.name} 装备。`, 'error'); return; }
-    if (player.bag.length >= player.bagMax) { toast("行囊已满，先腾出空间。", 'error'); return; }
+    if (player.bag.length >= player.bagMax) { toast("行囊已满，先腾空间或去黑市扩容。", 'error'); return; }
     const cost = gearCraftCost(tier);
     const have = player.materials[cost.ingotKey] || 0;
     const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;

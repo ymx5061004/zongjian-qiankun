@@ -22,7 +22,7 @@ import {
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
     enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
-    exportSaveFile, importSaveFile
+    exportSaveFile, importSaveFile, buyBagSlot
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -119,6 +119,7 @@ function onDelegatedClick(e) {
         case 'smelt': smeltByQuality(el.dataset.q.split(',').map(Number), el.dataset.label); break;
         case 'smelt-all': smeltAllItems(); break;
         case 'refresh-shop': refreshShop(); break;
+        case 'buy-bag-slot': buyBagSlot(); break;
         case 'upgrade-skill': upgradePlayerSkill(Number(el.dataset.idx)); break;
         case 'forget-skill': forgetSkill(Number(el.dataset.idx)); break;
         case 'learn-all': learnAllSkills(); break;
