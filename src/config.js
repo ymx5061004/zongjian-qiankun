@@ -117,5 +117,6 @@ export const BALANCE = {
     },
     hhSkillPrice: 380000,
 
-    shopHHChance: 0.4                         // 黑市出现洪荒孤本的概率
+    shopHHChance: 0.4,                        // 黑市出现洪荒孤本的概率
+    shopRefreshCost: 500                      // 黑市手动刷新花费(文)
 };

@@ -289,53 +289,61 @@ function tipAttr(obj) {
     return JSON.stringify(obj).replace(/&/g, '&amp;').replace(/'/g, '&#39;');
 }
 
-export function renderShopGoods() {
+// 进货：重随机生成整架商品。只在「启动」「付费手动刷新」时调用——切页/购买都不该换货。
+// 数据存模块级 shopGoods（不入存档），关游戏重开即一批新货。
+export function rollShopGoods() {
     const player = state.player;
-    const box = document.getElementById('shop-goods-box');
-    box.innerHTML = "";
     shopGoods = [];
-    const hasHHBook = Math.random() < BALANCE.shopHHChance;
-    let goodsCount = 6;
-
-    if (hasHHBook) {
-        const hhSkill = {
-            id: "sk_honghuang_unique",
-            name: "老区长混沌诀",
-            type: "passive",
-            level: 1,
-            isHongHuang: true,
+    if (Math.random() < BALANCE.shopHHChance) {
+        shopGoods.push({ kind: 'skill', obj: {
+            id: "sk_honghuang_unique", name: "老区长混沌诀", type: "passive", level: 1, isHongHuang: true,
             desc: "远古老区长遗留的法则具现。<br><br><span style='color:var(--color-honghuang)'>【洪荒法则】</span>：本功法最高可修炼至 100 重！每研习精进一重，【老区长的洪荒之力】永久 +1%（即全身各项基础属性暴增 2%）。研习此神功需要极其庞大的天地造化修为！",
             price: BALANCE.hhSkillPrice
-        };
-        const bookItem = { name: `禁忌秘籍·《${hhSkill.name}》`, type: "book", payload: hhSkill, price: hhSkill.price };
-        const idx = shopGoods.push({ kind: 'skill', obj: hhSkill }) - 1;
-        const card = document.createElement('div');
-        card.className = "list-card";
-        card.style.border = "1px solid var(--color-honghuang)";
-        card.style.background = "linear-gradient(90deg, #1a050c 0%, #111 100%)";
-        card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong class="q-hh">🔥 绝世孤本《${hhSkill.name}》 🔍</strong></span><button class="btn btn-danger" data-act="buy-skill" data-idx="${idx}">购买 (380000文)</button>`;
-        box.appendChild(card);
-        goodsCount = 5;
+        } });
     }
+    const skillCount = shopGoods.length ? 2 : 3; // 出了孤本则普通货位 6→5（孤本占掉一个秘籍位）
+    for (let i = 0; i < 3; i++) shopGoods.push({ kind: 'item', obj: generateItemByMatrix(player.realmLevel) });
+    for (let i = 0; i < skillCount; i++) {
+        // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/...），仅覆盖售价为固定 6000。
+        const sk = generateSkillByMatrix(player.realmLevel);
+        sk.price = 6000;
+        shopGoods.push({ kind: 'skill', obj: sk });
+    }
+    renderShopGoods();
+}
 
-    for (let i = 1; i <= goodsCount; i++) {
+// 买走一件后从货架移除（不重随机，保留其余）。控制层购买成功后调用，再 renderShopGoods。
+export function removeShopGood(idx) {
+    if (idx >= 0 && idx < shopGoods.length) shopGoods.splice(idx, 1);
+}
+
+// 纯渲染当前货架（切页 / 购买后调用，不重随机）。货架为空时提示去刷新。
+export function renderShopGoods() {
+    const box = document.getElementById('shop-goods-box');
+    box.innerHTML = "";
+    if (shopGoods.length === 0) {
+        box.innerHTML = `<div class="list-card" style="justify-content:center; color:var(--text-muted);">— 黑市货已售罄，点上方「刷新」可重新进货 —</div>`;
+        return;
+    }
+    shopGoods.forEach((g, idx) => {
         const card = document.createElement('div');
         card.className = "list-card";
-        if (i <= 3) {
-            const mockItem = generateItemByMatrix(player.realmLevel);
-            const idx = shopGoods.push({ kind: 'item', obj: mockItem }) - 1;
-            card.innerHTML = `<span data-tip='${tipAttr(mockItem)}' style="cursor:help;"><b class="q-${mockItem.quality}">[装备] ${mockItem.name} 🔍</b></span><button class="btn btn-success" data-act="buy-item" data-idx="${idx}">购买 (${mockItem.price}文)</button>`;
+        if (g.kind === 'item') {
+            const it = g.obj;
+            card.innerHTML = `<span data-tip='${tipAttr(it)}' style="cursor:help;"><b class="q-${it.quality}">[装备] ${it.name} 🔍</b></span><button class="btn btn-success" data-act="buy-item" data-idx="${idx}">购买 (${it.price}文)</button>`;
+        } else if (g.obj.isHongHuang) {
+            const hhSkill = g.obj;
+            const bookItem = { name: `禁忌秘籍·《${hhSkill.name}》`, type: "book", payload: hhSkill, price: hhSkill.price };
+            card.style.border = "1px solid var(--color-honghuang)";
+            card.style.background = "linear-gradient(90deg, #1a050c 0%, #111 100%)";
+            card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong class="q-hh">🔥 绝世孤本《${hhSkill.name}》 🔍</strong></span><button class="btn btn-danger" data-act="buy-skill" data-idx="${idx}">购买 (${hhSkill.price}文)</button>`;
         } else {
-            // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/dropRate/coinRate），
-            // 仅覆盖售价为固定 6000。原先此处手搓的对象漏了 power，主动技触发时伤害会算成 NaN。
-            const mockSkill = generateSkillByMatrix(player.realmLevel);
-            mockSkill.price = 6000;
-            const bookItem = { name: `秘籍·《${mockSkill.name}》`, type: "book", payload: mockSkill, price: mockSkill.price };
-            const idx = shopGoods.push({ kind: 'skill', obj: mockSkill }) - 1;
-            card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong style="color:var(--color-gold);">📜 绝学《${mockSkill.name}》 🔍</strong></span><button class="btn btn-success" data-act="buy-skill" data-idx="${idx}">购买 (${mockSkill.price}文)</button>`;
+            const sk = g.obj;
+            const bookItem = { name: `秘籍·《${sk.name}》`, type: "book", payload: sk, price: sk.price };
+            card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong style="color:var(--color-gold);">📜 绝学《${sk.name}》 🔍</strong></span><button class="btn btn-success" data-act="buy-skill" data-idx="${idx}">购买 (${sk.price}文)</button>`;
         }
         box.appendChild(card);
-    }
+    });
 }
 
 // ---------- 天地洪炉两槽 ----------
@@ -602,7 +610,7 @@ export function renderGuide() {
     </tbody></table>
 
     <h3 id="sec-shop">⑨ 珍宝黑市</h3>
-    <p>每次进入/购买都会刷新一批货：通常 6 件（3 装备 ＋ 3 普通秘籍，秘籍定价 6000 文）。有 <b>${B.shopHHChance * 100}%</b> 概率刷出<b style="color:var(--color-honghuang)">洪荒孤本《老区长混沌诀》</b>（售价 ${formatNumber(B.hhSkillPrice)} 文），此时普通货位减为 5 件。孤本是开启「洪荒之力」乘区的关键，遇到务必抢购。</p>
+    <p>黑市共 6 件货（3 装备 ＋ 3 普通秘籍，秘籍定价 6000 文）：<b>买走一件就少一件、其余不变</b>，切换页签也不会换货；想要整批新货，点【刷新】花 <b>${B.shopRefreshCost}</b> 文。有 <b>${B.shopHHChance * 100}%</b> 概率出<b style="color:var(--color-honghuang)">洪荒孤本《老区长混沌诀》</b>（售价 ${formatNumber(B.hhSkillPrice)} 文，此时普通货位减为 5 件）——孤本是开启「洪荒之力」乘区的关键，遇到务必抢购。</p>
 
     <h3 id="sec-grow">⑩ 破境冲关 与 渡劫轮回</h3>
     <h4>破境冲关（线性成长）</h4>

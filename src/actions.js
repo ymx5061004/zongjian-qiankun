@@ -8,7 +8,7 @@ import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllG
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
-    skillBrief, skillDescText
+    rollShopGoods, removeShopGood, skillBrief, skillDescText
 } from './ui/render.js';
 import { saveGame } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -55,10 +55,12 @@ export function buyShopItem(idx) {
     if (player.bag.length >= player.bagMax) { toast("背包空间已满。", 'error'); return; }
     player.coin -= itemObj.price;
     player.bag.push(itemObj);
+    removeShopGood(idx);          // 只移除买走的这件，其余货保留（不再整架重随机）
     hideTooltip();
     renderShopGoods();
     renderBag();
     updatePlayerAttributes();
+    saveGame();
 }
 
 export function buyShopSkill(idx) {
@@ -74,10 +76,25 @@ export function buyShopSkill(idx) {
         name: skObj.isHongHuang ? `禁忌秘籍·《${skObj.name}》` : `秘籍·《${skObj.name}》`,
         type: "book", payload: skObj, price: Math.floor(skObj.price / 5)
     });
+    removeShopGood(idx);          // 只移除买走的这件，其余货保留（不再整架重随机）
     hideTooltip();
     renderShopGoods();
     renderBag();
     updatePlayerAttributes();
+    saveGame();
+}
+
+// —— 黑市付费刷新：扣 shopRefreshCost 文，重随机整架货 ——
+export function refreshShop() {
+    const player = state.player;
+    const cost = BALANCE.shopRefreshCost;
+    if (player.coin < cost) { toast(`刷新黑市需 ${cost} 文碎银，碎银不足。`, 'error'); return; }
+    player.coin -= cost;
+    rollShopGoods();
+    hideTooltip();
+    updatePlayerAttributes();
+    saveGame();
+    toast(`已消耗 ${cost} 文，黑市新进了一批货。`, 'success');
 }
 
 // —— 洪炉：取出 / 合成 ——

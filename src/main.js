@@ -9,7 +9,7 @@ import { loadGame, saveGame } from './storage.js';
 import {
     initTooltipEvent, hideTooltip, switchPage,
     updatePlayerAttributes, renderForge, renderBag,
-    renderMapList, renderPlayerSkills, renderShopGoods
+    renderMapList, renderPlayerSkills, rollShopGoods
 } from './ui/render.js';
 import { startHangup, stopHangup } from './ui/battle.js';
 import { initDragDrop } from './ui/drag.js';
@@ -17,7 +17,7 @@ import { toast } from './ui/dialog.js';
 import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
-    useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill
+    useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -75,7 +75,7 @@ function initGameCore() {
     renderBag();
     renderMapList();
     renderPlayerSkills();
-    renderShopGoods();
+    rollShopGoods();
     setInterval(saveGame, 5000);
 }
 
@@ -96,7 +96,7 @@ function onDelegatedClick(e) {
         case 'forge': executeForge(); break;
         case 'smelt': smeltByQuality(el.dataset.q.split(',').map(Number), el.dataset.label); break;
         case 'smelt-all': smeltAllItems(); break;
-        case 'refresh-shop': renderShopGoods(); break;
+        case 'refresh-shop': refreshShop(); break;
         case 'upgrade-skill': upgradePlayerSkill(Number(el.dataset.idx)); break;
         case 'forget-skill': forgetSkill(Number(el.dataset.idx)); break;
         case 'learn-all': learnAllSkills(); break;
