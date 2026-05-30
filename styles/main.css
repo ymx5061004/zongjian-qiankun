@@ -181,7 +181,7 @@
             body { padding: 0; }
             /* 手机端铺满整屏：窗口至少撑满视口高度，消除内容短时底部露出的 body 黑边。
                100dvh 用动态视口高度，自适应移动浏览器地址栏伸缩；100vh 作回退。 */
-            #game-window { border-radius: 0; border-width: 0; box-shadow: none; min-height: 100vh; min-height: 100dvh; }
+            #game-window { border-radius: 0; border-width: 0; box-shadow: none; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 
             /* 顶栏：标题与货币纵向堆叠，货币可换行。
                min-height + 整条不折行，避免数值变长时顶栏高度跳变带动下方抖动 */
@@ -195,12 +195,24 @@
             .nav-tabs::-webkit-scrollbar { display: none; }
             .tab-btn { flex: 0 0 auto; padding: 12px 16px; font-size: 14px; white-space: nowrap; }
 
-            .game-content { padding: 10px; min-height: 0; }
+            /* game-content 撑满 #game-window 的剩余高度，成为 flex 列容器，承载激活页 */
+            .game-content { padding: 10px; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 
             /* 所有分页改单列；抵消 index.html 内联的 grid-column: span 2。
                作者样式表里的 !important 优先级高于普通内联样式，可正常覆盖。 */
             .page.active { grid-template-columns: 1fr; gap: 12px; }
             .page > .sub-panel { grid-column: auto !important; }
+
+            /* 列表页(行囊/秘籍/黑市)：内容区吃满整屏，列表滚动区延伸到屏幕底部，消除窗口底部空白。
+               flex 链每级 min-height:0，保证内层 scroll-box 仍能正常滚动（否则 flex item 默认 min-height:auto 会撑破不滚动）。
+               命格/征途结构不同(无列表/列表在首面板)，不套此链——其底部留白与现状同色(#141414)，不变差。 */
+            #page-bag.active, #page-kungfu.active, #page-shop.active { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+            #page-bag.active > .sub-panel:last-child,
+            #page-kungfu.active > .sub-panel,
+            #page-shop.active > .sub-panel { flex: 1; min-height: 0; }
+            #page-bag.active > .sub-panel:last-child .scroll-box,
+            #page-kungfu.active .scroll-box,
+            #page-shop.active .scroll-box { flex: 1; max-height: none; min-height: 0; }
 
             .sub-panel { padding: 14px; }
             .panel-title { font-size: 15px; }
