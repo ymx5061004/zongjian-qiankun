@@ -3,7 +3,7 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES } from '../config.js';
 import { state } from '../state.js';
 import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor } from '../domain.js';
 import { formatNumber } from '../util.js';
@@ -100,6 +100,13 @@ const PASSIVE_ATTRS = [
     { k: 'dropRate', n: '掉宝', c: 'var(--color-gold)', s: '%' },
     { k: 'coinRate', n: '碎银', c: 'var(--color-gold)', s: '%' }
 ];
+// 旧五维 + 新词条(暗黑式 affix) 合并表：被动技能的全部可叠属性，列表/详情卡共用一份，避免漂移。
+const ALL_PASSIVE_ATTRS = [...PASSIVE_ATTRS, ...COMBAT_AFFIXES];
+
+// 把一门被动技能的所有词条渲染成 "名+值后缀" 片段数组。mult=1 为每重基础值，mult=sk.level 为当前合计。
+function passiveParts(sk, mult) {
+    return ALL_PASSIVE_ATTRS.filter(d => sk[d.k]).map(d => `${d.n}+${sk[d.k] * mult}${d.s || ''}`);
+}
 
 // 一行技能摘要（类型 + 关键加成）：背包操作弹窗 / 移动端点按用，与详情卡同源 BALANCE。
 export function skillBrief(sk) {
@@ -109,7 +116,7 @@ export function skillBrief(sk) {
         const heal = sk.healRate ? ` · 吸血 ${Math.round(sk.healRate * 100)}%` : '';
         return `主动招式 · ${sk.power || 0} 倍伤害（每重 +${BALANCE.battle.activeLevelScale}）${heal}`;
     }
-    const parts = PASSIVE_ATTRS.filter(d => sk[d.k]).map(d => `${d.n}+${sk[d.k]}${d.s || ''}`);
+    const parts = passiveParts(sk, 1);
     return `被动功法 · 每重 ${parts.length ? parts.join('　') : '（详见功效）'}`;
 }
 
@@ -157,12 +164,12 @@ function generateSkillColumn(sk, opts = {}) {
         html += `<div class="tooltip-attr"><span>当前 ${lv} 重:</span><span style="color:var(--color-orange)">${cur.toFixed(2)} 倍伤害</span></div>`;
         html += `<div class="tooltip-attr"><span>暴击时:</span><span style="color:var(--color-orange)">再 ×${B.critMult}</span></div>`;
         if (sk.healRate) html += `<div class="tooltip-attr"><span>吸血:</span><span style="color:var(--color-success)">伤害的 ${Math.round(sk.healRate * 100)}%</span></div>`;
-        // 实战：每回合 activeSkillChance 触发后，从所有主动技中等概率随机择一；故单招真实概率 = 0.4 / 主动技数
+        // 实战：每回合 activeSkillChance 概率施展；多门主动技不再稀释——触发时固定放「有效倍率最高」的一招。
+        const pct = Math.round(B.activeSkillChance * 100);
         const activeCount = state.player.skills.filter(s => s.type === 'active').length || 1;
-        const perSkillPct = Math.round(B.activeSkillChance / activeCount * 100);
-        html += `<div style="font-size:11px;color:#777;margin-top:5px;">战斗中每回合约 ${perSkillPct}% 概率施展${activeCount > 1 ? `（共 ${activeCount} 门主动技随机择一）` : ''}</div>`;
+        html += `<div style="font-size:11px;color:#777;margin-top:5px;">战斗中每回合 ${pct}% 概率施展${activeCount > 1 ? `（多门主动技取最强一招，不再稀释）` : ''}</div>`;
     } else {
-        const rows = PASSIVE_ATTRS.filter(d => sk[d.k]);
+        const rows = ALL_PASSIVE_ATTRS.filter(d => sk[d.k]);
         if (!rows.length) html += `<div style="color:#777;font-size:12px;">（无直接五维加成，详见下方功效）</div>`;
         rows.forEach(d => {
             html += `<div class="tooltip-attr"><span>${d.n}:</span><span style="color:${d.c}">每重 +${sk[d.k]}${d.s || ''} · 当前 +${sk[d.k] * lv}${d.s || ''}</span></div>`;
@@ -440,7 +447,7 @@ export function renderPlayerSkills() {
             const cur = ((sk.power || 0) + sk.level * BALANCE.battle.activeLevelScale).toFixed(2);
             eff = `主战招式 · 当前 ${cur} 倍伤害${sk.healRate ? ` · 吸血 ${Math.round(sk.healRate * 100)}%` : ''}`;
         } else {
-            const parts = PASSIVE_ATTRS.filter(d => sk[d.k]).map(d => `${d.n}+${sk[d.k] * sk.level}${d.s || ''}`);
+            const parts = passiveParts(sk, sk.level);
             eff = `功法被动 · ${parts.length ? parts.join('　') : '点 🔍 查看功效'}`;
         }
 
@@ -754,15 +761,9 @@ export function renderGuide() {
         `<tr><td style="color:var(--color-orange);white-space:nowrap;">…${s.name}</td><td>${s.power} 倍</td><td style="color:#999;">${s.desc}${s.healRate ? `（吸血 ${Math.round(s.healRate * 100)}%）` : ''}</td></tr>`
     ).join('');
     const passiveRows = passives.map(s => {
-        const parts = [];
-        if (s.hp) parts.push(`气血+${s.hp}`);
-        if (s.atk) parts.push(`攻击+${s.atk}`);
-        if (s.def) parts.push(`防御+${s.def}`);
-        if (s.crit) parts.push(`暴击+${s.crit}%`);
-        if (s.dodge) parts.push(`闪避+${s.dodge}%`);
-        if (s.dropRate) parts.push(`掉宝+${s.dropRate}%`);
-        if (s.coinRate) parts.push(`财运+${s.coinRate}%`);
-        return `<tr><td style="color:var(--color-blue);white-space:nowrap;">…${s.name}</td><td style="white-space:nowrap;">${parts.join('　')}</td><td style="color:#999;">每重永久叠加</td></tr>`;
+        // 词条片段统一从合并表取（旧五维 + 新 affix），新增词条会自动出现在指南里。
+        const parts = ALL_PASSIVE_ATTRS.filter(d => s[d.k]).map(d => `${d.n}+${s[d.k]}${d.s || ''}`);
+        return `<tr><td style="color:var(--color-blue);white-space:nowrap;">…${s.name}</td><td style="white-space:nowrap;">${parts.join('　')}</td><td style="color:#999;">${s.desc || '每重永久叠加'}</td></tr>`;
     }).join('');
 
     // —— 关卡 / 敌人示例（难度 = 2^(关卡-1)）——
@@ -801,7 +802,7 @@ export function renderGuide() {
     <div class="guide-formula"><b>【你方出手】</b>
 1. 暴击判定：随机数(0~100) &lt; 暴击率 → 暴击
 2. 基础伤害 = 攻击力
-3. 主动技判定：${bt.activeSkillChance * 100}% 概率施展（拥有多门主动技时随机择一）
+3. 主动技判定：${bt.activeSkillChance * 100}% 概率施展（拥有多门主动技时固定取「有效倍率最高」的一招，不再稀释）
      施展 → 伤害 ×（招式倍率 ＋ 招式重数 × ${bt.activeLevelScale}）
 4. 若暴击 → 伤害 ×${bt.critMult}
 5. 对敌实伤 = max(1, 伤害 − 敌方防御)
@@ -813,6 +814,7 @@ export function renderGuide() {
 8. 未闪避 → 受到伤害 = max(1, 敌方攻击 − 你方防御)
    ▶ 你方气血 ≤ 0 → 立即<span style="color:var(--color-accent)">战败</span></div>
     <div class="guide-tip">💡 关键规则：<br>• <b>伤害下限为 1</b>——再厚的防御也挡不到「完全免伤」，但能把伤害压到极低。<br>• <b>闪避是全有或全无</b>：触发即免疫该次<b>全部</b>伤害，否则全额承受。<br>• <b>闪避率封顶 ${B.dodgeCap}%</b>：再怎么堆叠，也至少有 ${100 - B.dodgeCap}% 的攻击必命中——堆满闪避<b>不会无敌</b>，仍需血量/防御兜底。<br>• <b>敌人不会暴击、也不会闪避</b>——暴击只属于你的进攻，闪避只属于你的防守。<br>• <b>撑满 ${bt.maxRounds} 回合不分胜负 → 只要你存活即判胜</b>。高血+高防+高闪可「磨」过一时打不动的强敌。</div>
+    <div class="guide-note">⚙️ 上面是基础攻防骨架；被动秘籍的<b>词条</b>会嵌进同一回合结算——<b>你方出手</b>叠加增伤/暴伤/破甲/流血/吸血，<b>敌方反击</b>前先过定身→格挡→闪避、命中再吃减伤与荆棘反伤，<b>回合末</b>龟息回血；斩杀(敌残血)/背水(己残血)/先发(开场)/连击(久战)等条件词条按触发线生效。各词条数值见下方 <b>⑦ 秘籍系统</b> 的「被动功法」表。</div>
 
     <h3 id="sec-formula">④ 属性结算公式</h3>
     <p>面板上的最终属性，由「基础值 → 轮回放大 → 加被动/装备 → 洪荒放大」逐层结算：</p>
@@ -844,7 +846,7 @@ export function renderGuide() {
 
     <h3 id="sec-skill">⑦ 秘籍系统</h3>
     <p>秘籍分三类：<b style="color:var(--color-orange)">主动招式</b>（战斗中触发、按倍率打伤害）、<b style="color:var(--color-blue)">被动功法</b>（永久叠加属性）、<b style="color:var(--color-honghuang)">洪荒法则</b>（独一档的全属性乘区）。</p>
-    <h4>主动招式（每回合 ${bt.activeSkillChance * 100}% 概率施展其一）</h4>
+    <h4>主动招式（每回合 ${bt.activeSkillChance * 100}% 概率施展；多门时取最强一招，不再稀释）</h4>
     <table class="guide-table"><thead><tr><th>招式</th><th>基础倍率</th><th>功效（每重 +${bt.activeLevelScale} 倍）</th></tr></thead><tbody>${activeRows}</tbody></table>
     <h4>被动功法（每重永久叠加）</h4>
     <table class="guide-table"><thead><tr><th>功法</th><th>每重加成</th><th>说明</th></tr></thead><tbody>${passiveRows}</tbody></table>

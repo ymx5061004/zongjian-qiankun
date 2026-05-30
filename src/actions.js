@@ -426,7 +426,8 @@ export function upgradePlayerSkill(idx) {
     saveGame();
 }
 
-// —— 遗忘功法：仅限「主动招式」。多门主动技会稀释每门的触发概率(40%÷门数)，故需要精简手段；
+// —— 遗忘功法：仅限「主动招式」。触发概率恒为 activeSkillChance、固定施展「有效倍率最高」的一招(见 domain.pickActive)，
+//    多学弱主动技不再稀释触发，但会永久占位且永远不会被选中——故仍提供精简手段；
 //    被动功法是永久增益、洪荒功法乃立身根本，均不提供遗忘（按钮层也不显示，这里再做一层防御）。——
 export async function forgetSkill(idx) {
     const player = state.player;

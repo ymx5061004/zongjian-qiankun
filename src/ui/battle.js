@@ -111,6 +111,8 @@ function executeLoopBattle(mapId) {
                 setTimeout(() => eSprite.classList.remove('hurt-shake'), 150);
                 spawnPopupEffect(false, ev.isCrit ? `暴击 -${formatNumber(ev.dmg)}` : `-${formatNumber(ev.dmg)}`, ev.isCrit);
                 if (ev.heal > 0) spawnPopupEffect(true, `+${ev.heal}`, false, true);
+                // 流血：错峰再弹一个红字，避免和主伤害数字完全重叠
+                if (ev.bleed > 0) setTimeout(() => spawnPopupEffect(false, `🩸-${formatNumber(ev.bleed)}`, false), 120);
                 document.getElementById('sprite-e-hp').style.width = ev.eHpPct + "%";
             }, base);
         } else if (ev.side === 'enemy') {
@@ -120,10 +122,17 @@ function executeLoopBattle(mapId) {
                 pSprite.classList.add('hurt-shake');
                 setTimeout(() => pSprite.classList.remove('hurt-shake'), 150);
                 spawnPopupEffect(true, `-${formatNumber(ev.dmg)}`, false);
+                // 荆棘反伤：受击同时崩对手一下
+                if (ev.reflect > 0) setTimeout(() => spawnPopupEffect(false, `🌵-${formatNumber(ev.reflect)}`, false), 120);
                 document.getElementById('sprite-p-hp').style.width = ev.pHpPct + "%";
             }, base + B.playerActionDelayMs);
-        } else { // dodge
-            setTimeout(() => { spawnPopupEffect(true, "闪避", false); }, base + B.playerActionDelayMs);
+        } else if (ev.side === 'regen') {
+            setTimeout(() => {
+                spawnPopupEffect(true, `+${formatNumber(ev.heal)}`, false, true);
+                document.getElementById('sprite-p-hp').style.width = ev.pHpPct + "%";
+            }, base + B.playerActionDelayMs);
+        } else { // evade：闪避 / 格挡 / 定身（text 决定文案）
+            setTimeout(() => { spawnPopupEffect(true, ev.text || "闪避", false); }, base + B.playerActionDelayMs);
         }
     });
 

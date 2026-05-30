@@ -29,7 +29,26 @@ export const SKILL_SUFFIXES = [
     { name: "心法", type: "passive", def: 20, dodge: 1.5, desc: "每重永久叠加[防御]防御与[闪避]%闪避。" },
     { name: "真卷", type: "passive", atk: 40, crit: 1.5, desc: "每重永久叠加[攻击]攻击与[暴击]%暴击率。" },
     { name: "寻龙诀", type: "passive", dropRate: 15, desc: "每重永久提升【掉宝率】 15%。" },
-    { name: "招财秘录", type: "passive", coinRate: 15, desc: "每重增加 15% 碎银获取率。" }
+    { name: "招财秘录", type: "passive", coinRate: 15, desc: "每重增加 15% 碎银获取率。" },
+
+    // —— 新词条（暗黑式 affix，均为被动；字段对应 COMBAT_AFFIXES，由 simulateBattle 结算）——
+    // 进攻乘区
+    { name: "杀诀",   type: "passive", critDmg: 25,  desc: "每重【暴击伤害】+25%（与暴击率相乘，越暴越痛）。" },
+    { name: "战意篇", type: "passive", dmgBonus: 8,  desc: "每重【增伤】+8%（一切伤害的独立加成池）。" },
+    { name: "裂甲式", type: "passive", armorPen: 6,  desc: "每重【破甲】+6%，无视敌人对应比例的防御（克高防）。" },
+    { name: "吸星诀", type: "passive", lifestealPct: 4, desc: "每重【吸血】+4%：普攻按对敌实伤回血。" },
+    // 防御生存
+    { name: "护体诀", type: "passive", dmgReduction: 5, desc: "每重【减伤】-5%：受到的伤害按比例削减。" },
+    { name: "龟息功", type: "passive", regenPct: 3, desc: "每重【回血】+3%：每回合回复最大生命的对应比例。" },
+    { name: "荆棘甲", type: "passive", thornsPct: 18, desc: "每重【反伤】+18%：受击时反弹自身攻击的对应比例（真伤）。" },
+    { name: "铁布衫", type: "passive", blockPct: 5, desc: "每重【格挡】+5%：概率完全格挡一次敌方攻击（与闪避分轴）。" },
+    // 条件触发
+    { name: "斩魂式", type: "passive", executeBonus: 30, desc: "每重【斩杀】+30%：敌方生命低于 25% 时伤害大涨（处决）。" },
+    { name: "背水诀", type: "passive", lastStandBonus: 15, desc: "每重【背水】+15%：自身生命低于 35% 时，增伤与减伤同时上涨。" },
+    { name: "疾风式", type: "passive", openerBonus: 20, desc: "每重【先发增伤】+20%：战斗前 2 回合伤害提升（开场一击流）。" },
+    { name: "连环掌", type: "passive", rampPerRound: 5, desc: "每重【连击增伤】+5%/回合：每多打一回合越战越勇，最多叠 8 层。" },
+    { name: "血刃术", type: "passive", bleedPct: 12, desc: "每重【流血】+12%：每回合额外造成自身攻击对应比例的真伤（无视防御）。" },
+    { name: "锁灵咒", type: "passive", stunChance: 8, desc: "每重【定身】+8%：概率令敌人本回合无法出手。" }
 ];
 
 export const REALMS = ["后天", "先天", "宗师", "大宗师", "渡劫", "天仙", "金仙", "仙帝", "神话", "至高天尊"];
@@ -154,8 +173,45 @@ export const BALANCE = {
     upgrade: {
         crystalCost: { 7: 3, 8: 8 },        // 进到第 N 档需神魂结晶数
         coinCost: { 7: 30000, 8: 120000 }   // 进到第 N 档需碎银
+    },
+
+    // —— 词条战斗常量（秘籍「暗黑词条化」用，全在此一处调；阈值固定、各词条只贡献「增益值×重数」）——
+    // ⚖️ 这些是新词条的「触发线/上限」旋钮，词条本身的每重数值在 COMBAT_AFFIXES / SKILL_SUFFIXES 里。试玩后在这调。
+    combat: {
+        executeThresh: 25,        // 斩杀：敌方生命低于此%时，触发「斩杀增伤」
+        lastStandThresh: 35,      // 背水：自身生命低于此%时，触发「背水」(同时吃增伤+减伤)
+        openerRounds: 2,          // 先发制人：战斗前 N 回合吃「先发增伤」
+        rampMaxStacks: 8,         // 越战越勇：连击增伤最多叠的回合数
+        armorPenCap: 75,          // 破甲上限%(无视敌防)
+        dmgReductionCap: 75,      // 减伤上限%
+        blockCap: 75              // 格挡率上限%
     }
 };
+
+// ============================================================
+// 「词条」(暗黑式 affix) ——秘籍/功法的随机词条池（被动子类）。
+// 每条 = 一个战斗 mod 字段，computeStats 按「字段值×重数」聚合(不吃轮回/洪荒乘区，纯百分比)，
+// simulateBattle 据此结算。加新词条 = 往这里加一条 + 在 SKILL_SUFFIXES 给它一个秘籍后缀名即可。
+//   k=字段名(skill 对象 + stats 上的键)；n=显示名；s=单位后缀；c=配色；
+//   cond=true 表示「条件触发型」(其阈值在 BALANCE.combat，这里只配每重的增益值)。
+// ============================================================
+export const COMBAT_AFFIXES = [
+    { k: 'critDmg',       n: '暴击伤害', s: '%',     c: 'var(--color-orange)' },
+    { k: 'dmgBonus',      n: '增伤',     s: '%',     c: 'var(--color-accent)' },
+    { k: 'armorPen',      n: '破甲',     s: '%',     c: 'var(--color-accent)' },
+    { k: 'dmgReduction',  n: '减伤',     s: '%',     c: 'var(--color-blue)'   },
+    { k: 'regenPct',      n: '回血',     s: '%',     c: 'var(--color-success)'},
+    { k: 'thornsPct',     n: '反伤',     s: '%',     c: 'var(--color-accent)' },
+    { k: 'blockPct',      n: '格挡',     s: '%',     c: 'var(--color-blue)'   },
+    { k: 'bleedPct',      n: '流血',     s: '%',     c: 'var(--color-accent)' },
+    { k: 'lifestealPct',  n: '吸血',     s: '%',     c: 'var(--color-success)'},
+    { k: 'executeBonus',  n: '斩杀增伤', s: '%',     c: 'var(--color-orange)', cond: true },
+    { k: 'lastStandBonus',n: '背水',     s: '%',     c: 'var(--color-orange)', cond: true },
+    { k: 'openerBonus',   n: '先发增伤', s: '%',     c: 'var(--color-orange)', cond: true },
+    { k: 'rampPerRound',  n: '连击增伤', s: '%/回合', c: 'var(--color-orange)', cond: true },
+    { k: 'stunChance',    n: '定身',     s: '%',     c: 'var(--color-blue)',   cond: true }
+];
+export const COMBAT_AFFIX_KEYS = COMBAT_AFFIXES.map(a => a.k);
 
 // ============================================================
 // 生产技能体系（武侠版梅尔沃的「非战斗」侧）。

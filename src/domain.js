@@ -3,7 +3,8 @@
 // 可单独测试。输入参数、输出结果，由控制层(actions)负责落地到 state/界面。
 // ============================================================
 import {
-    ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS
+    ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
+    COMBAT_AFFIX_KEYS
 } from './config.js';
 
 // —— 境界名 ——
@@ -110,6 +111,16 @@ export function computeStats(player) {
         if (sk.type === 'passive') {
             if (sk.dropRate) stats.dropRate += (sk.dropRate * sk.level);
             if (sk.coinRate) stats.coinRate += (sk.coinRate * sk.level);
+        }
+    });
+
+    // —— 词条战斗 mod 聚合（暗黑式 affix）——
+    // 纯百分比，按「字段值 × 重数」线性叠加；不吃轮回/洪荒乘区（它们已是相对值，再乘会失控）。
+    // 缺省全为 0 → 旧档/无词条玩家对战斗零影响。各 cap 在 simulateBattle 里收口。
+    COMBAT_AFFIX_KEYS.forEach(k => { stats[k] = 0; });
+    player.skills.forEach(sk => {
+        if (sk.type === 'passive') {
+            COMBAT_AFFIX_KEYS.forEach(k => { if (sk[k]) stats[k] += (sk[k] * sk.level); });
         }
     });
 
@@ -236,7 +247,7 @@ export function gearUpgradeCost(item) {
 // —— 随机秘籍生成（价格随境界）——
 export function generateSkillByMatrix(realmLevel) {
     const suff = SKILL_SUFFIXES[Math.floor(Math.random() * SKILL_SUFFIXES.length)];
-    return {
+    const sk = {
         id: "sk_" + Math.floor(Math.random() * 1000000),
         name: SKILL_SECTS[Math.floor(Math.random() * SKILL_SECTS.length)] + suff.name,
         type: suff.type, level: 1, baseRate: BALANCE.skill.baseRate,
@@ -246,53 +257,133 @@ export function generateSkillByMatrix(realmLevel) {
         desc: suff.desc,
         price: Math.floor(Math.random() * 15000) + 4000 + (realmLevel * 400)
     };
+    // 复制新词条字段（暗黑式 affix）——只复制后缀上确有的，避免给每个技能塞满 0 字段
+    COMBAT_AFFIX_KEYS.forEach(k => { if (suff[k]) sk[k] = suff[k]; });
+    return sk;
 }
 
 // —— 战斗纯模拟：把整场战斗算完，返回胜负 + 逐回合事件，供视图层播放动画 ——
-// stats: computeStats 的 stats；enemy: finalizeEnemyStats 结果；skills: player.skills
+// stats: computeStats 的 stats（已含词条 mod 字段，缺省 0）；enemy: finalizeEnemyStats 结果；skills: player.skills
+//
+// 词条结算顺序（每回合，玩家先手）：
+//   ① 攒「增伤池」bonusPct = 增伤 + 先发(前N回合) + 连击(逐回合叠) + 斩杀(敌残血) + 背水(自残血)
+//   ② 基础攻击 → 主动技倍率 → ×(1+增伤池) → 暴击 ×(暴伤乘区) → 减敌防(破甲后)
+//   ③ 流血(真伤) / 吸血(主动 healRate + 被动吸血)
+//   ④ 敌方出手：定身→格挡→闪避→命中(背水/减伤削减)→反伤
+//   ⑤ 回合末：龟息回血
 export function simulateBattle(stats, enemy, skills) {
     const B = BALANCE.battle;
+    const C = BALANCE.combat;
     const maxPHp = stats.hp;
     let eHp = enemy.maxHp;
     let pHp = maxPHp;
     const events = [];
     const activePool = skills.filter(s => s.type === 'active');
-    let round = 1;
 
+    // —— 取词条 mod（缺省 0；带 cap 的就地封顶）——
+    const critDmg = stats.critDmg || 0;
+    const dmgBonus = stats.dmgBonus || 0;
+    const armorPen = Math.min(C.armorPenCap, stats.armorPen || 0);
+    const dmgReduction = stats.dmgReduction || 0;
+    const regenPct = stats.regenPct || 0;
+    const thornsPct = stats.thornsPct || 0;
+    const blockPct = Math.min(C.blockCap, stats.blockPct || 0);
+    const bleedPct = stats.bleedPct || 0;
+    const lifestealPct = stats.lifestealPct || 0;
+    const executeBonus = stats.executeBonus || 0;
+    const lastStandBonus = stats.lastStandBonus || 0;
+    const openerBonus = stats.openerBonus || 0;
+    const rampPerRound = stats.rampPerRound || 0;
+    const stunChance = stats.stunChance || 0;
+
+    const enemyEffDef = enemy.def * (1 - armorPen / 100);     // 破甲后的敌防（全程固定）
+    const bleedDmg = bleedPct > 0 ? Math.floor(stats.atk * bleedPct / 100) : 0;       // 每回合流血真伤
+    const thornsDmg = thornsPct > 0 ? Math.floor(stats.atk * thornsPct / 100) : 0;    // 受击反弹真伤
+    const regenAmt = regenPct > 0 ? Math.floor(maxPHp * regenPct / 100) : 0;          // 每回合龟息
+
+    let round = 1;
     while (eHp > 0 && pHp > 0 && round <= B.maxRounds) {
+        const lowHp = (pHp / maxPHp) * 100 < C.lastStandThresh;   // 背水：本回合自身残血？(回合初判定)
+
+        // ① 增伤池
+        let bonusPct = dmgBonus;
+        if (round <= C.openerRounds) bonusPct += openerBonus;                              // 先发制人
+        if (rampPerRound) bonusPct += rampPerRound * Math.min(round - 1, C.rampMaxStacks); // 越战越勇
+        if ((eHp / enemy.maxHp) * 100 < C.executeThresh) bonusPct += executeBonus;          // 斩杀
+        if (lowHp) bonusPct += lastStandBonus;                                              // 背水(进攻侧)
+
+        // ② 玩家出手
         const isCrit = Math.random() * 100 < stats.crit;
         let dmg = stats.atk;
         const active = activePool.length > 0 && Math.random() < B.activeSkillChance
-            ? activePool[Math.floor(Math.random() * activePool.length)]
+            ? pickActive(activePool)   // 不再随机稀释：触发时固定施展「最强」一招（多学不再变弱）
             : null;
         // 兜底：power 缺失/非有限数时按 1 倍处理，绝不让伤害退化成 NaN（旧档里可能存在缺 power 的主动技）
         if (active) {
             const power = Number.isFinite(active.power) ? active.power : 1;
             dmg = Math.floor(dmg * (power + active.level * B.activeLevelScale));
         }
-        if (isCrit) dmg = Math.floor(dmg * B.critMult);
+        if (bonusPct) dmg = Math.floor(dmg * (1 + bonusPct / 100));
+        if (isCrit) dmg = Math.floor(dmg * (B.critMult + critDmg / 100));   // 暴伤为暴击乘区的额外加成
 
-        const dmgToE = Math.max(1, dmg - enemy.def);
+        const dmgToE = Math.max(1, Math.floor(dmg - enemyEffDef));
         eHp -= dmgToE;
-        const heal = (active && active.healRate) ? Math.floor(dmgToE * active.healRate) : 0;
-        if (heal > 0) pHp = Math.min(maxPHp, pHp + heal);
+        if (bleedDmg > 0) eHp -= bleedDmg;                                  // ③ 流血(无视防御)
 
-        events.push({ side: 'player', round, dmg: dmgToE, isCrit, heal, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
+        // 吸血：主动技 healRate（按对敌实伤）+ 被动吸血词条
+        let heal = 0;
+        if (active && active.healRate) heal += Math.floor(dmgToE * active.healRate);
+        if (lifestealPct > 0) heal += Math.floor(dmgToE * lifestealPct / 100);
+        // 上报「实际生效回血」(封顶后增量)而非名义值：满血时溢出部分不计，飘字才与血条涨幅一致
+        if (heal > 0) { const before = pHp; pHp = Math.min(maxPHp, pHp + heal); heal = pHp - before; }
+
+        events.push({ side: 'player', round, dmg: dmgToE, isCrit, heal, bleed: bleedDmg, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
         if (eHp <= 0) break;
 
-        if (!(Math.random() * 100 < stats.dodge)) {
-            const dmgToP = Math.max(1, enemy.atk - stats.def);
-            pHp -= dmgToP;
-            events.push({ side: 'enemy', round, dmg: dmgToP, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
+        // ④ 敌方出手：定身 → 格挡 → 闪避 → 命中
+        if (stunChance > 0 && Math.random() * 100 < stunChance) {
+            events.push({ side: 'evade', round, text: '定身' });
+        } else if (blockPct > 0 && Math.random() * 100 < blockPct) {
+            events.push({ side: 'evade', round, text: '格挡' });
+        } else if (Math.random() * 100 < stats.dodge) {
+            events.push({ side: 'evade', round, text: '闪避' });
         } else {
-            events.push({ side: 'dodge', round });
+            let dmgToP = Math.max(1, enemy.atk - stats.def);
+            const red = Math.min(C.dmgReductionCap, dmgReduction + (lowHp ? lastStandBonus : 0)); // 减伤(背水加成，统一封顶)
+            if (red > 0) dmgToP = Math.max(1, Math.floor(dmgToP * (1 - red / 100)));
+            pHp -= dmgToP;
+            if (thornsDmg > 0) eHp -= thornsDmg;                           // 反伤(真伤)
+            events.push({ side: 'enemy', round, dmg: dmgToP, reflect: thornsDmg, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
+            if (eHp <= 0) break;                                            // 反伤也可能反杀
         }
         if (pHp <= 0) break;
+
+        // ⑤ 龟息回血（回合末）。上报实际生效增量(封顶后)，飘字与血条一致。
+        if (regenAmt > 0 && pHp < maxPHp) {
+            const before = pHp;
+            pHp = Math.min(maxPHp, pHp + regenAmt);
+            events.push({ side: 'regen', round, heal: pHp - before, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
+        }
         round++;
     }
 
     // enemyDead：敌人是否真被打死(用于 Boss——撑满回合"存活"不算击杀)。win 沿用旧义(玩家存活)，地图挂机不变。
     return { win: pHp > 0, enemyDead: eHp <= 0, events };
+}
+
+// 触发主动技时择招：取「有效倍率最高」的一门（power + level*scale）。
+// 旧逻辑是随机择一 → 多学主动技反而稀释每招触发；改为固定放最强招，治掉「越学越亏」。
+// (二期会加「武学栏位」做有意识的双主动 combo，此处先作单招收口。)
+function pickActive(pool) {
+    const sc = BALANCE.battle.activeLevelScale;
+    let best = pool[0];
+    let bestEff = (Number.isFinite(best.power) ? best.power : 1) + (best.level || 1) * sc;
+    for (let i = 1; i < pool.length; i++) {
+        const s = pool[i];
+        const eff = (Number.isFinite(s.power) ? s.power : 1) + (s.level || 1) * sc;
+        if (eff > bestEff) { best = s; bestEff = eff; }
+    }
+    return best;
 }
 
 // —— 洪炉：花费 + 合成结果（纯计算，不扣钱、不动背包，交给控制层）——
