@@ -28,6 +28,21 @@ export function levelFromExp(exp) {
     return lv;
 }
 
+// —— 神兵强化下一级花费（纯函数）。返回 {targetLevel, ingotKey, ingotQty, coin}；已满级返回 null。——
+// 目标级越高 → 跨到越高级的锭(levelsPerTier 一档)，逼着玩家往深矿挖；碎银随目标级与品阶上扬。
+export function enhanceCost(item) {
+    const E = BALANCE.enhance;
+    const target = (item.enhance || 0) + 1;
+    if (target > E.maxLevel) return null;
+    const tierIdx = Math.min(E.ingotTiers.length - 1, Math.floor((target - 1) / E.levelsPerTier));
+    return {
+        targetLevel: target,
+        ingotKey: E.ingotTiers[tierIdx],
+        ingotQty: target,
+        coin: target * E.coinPerLevel * (1 + (item.quality || 0))
+    };
+}
+
 // —— 由 player 派生当前战斗属性。纯函数：返回 {stats, honghuangPower} ——
 export function computeStats(player) {
     const rebornMult = 1 + player.rebornCount * BALANCE.rebornMultPerCount;
@@ -51,14 +66,20 @@ export function computeStats(player) {
     for (const slot in player.equips) {
         const eq = player.equips[slot];
         if (eq) {
-            if (eq.atk) calcAtk += eq.atk;
-            if (eq.def) calcDef += eq.def;
-            if (eq.hp) calcHp += eq.hp;
+            // 强化(enhance)只放大攻/防/血等主属性，不碰暴击/闪避(%)，避免闪避被堆爆
+            const em = 1 + (eq.enhance || 0) * BALANCE.enhance.perLevel;
+            if (eq.atk) calcAtk += Math.floor(eq.atk * em);
+            if (eq.def) calcDef += Math.floor(eq.def * em);
+            if (eq.hp) calcHp += Math.floor(eq.hp * em);
             if (eq.crit) calcCrit += eq.crit;
             if (eq.dodge) calcDodge += eq.dodge;
         }
     }
 
+    // 属性计算顺序（勿随意调换）：
+    //   1) 基础值 + 被动技能 + 装备(已逐件按强化 em 放大攻/防/血) 求和 → calcHp/Atk/Def
+    //   2) 整体再乘洪荒倍率 hhMultiplier
+    // 即：强化是「装备层」的放大，洪荒是「全身」的乘区——强化溢价也会被洪荒进一步放大，系有意设计。
     // 洪荒之力 = 洪荒功法的当前等级
     let honghuangPower = 0;
     player.skills.forEach(sk => { if (sk.isHongHuang) honghuangPower = sk.level; });

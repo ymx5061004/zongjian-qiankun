@@ -20,7 +20,8 @@ import { toast } from './ui/dialog.js';
 import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
-    useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop
+    useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
+    enhanceEquip
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -100,6 +101,7 @@ function onDelegatedClick(e) {
         case 'breakthrough': playerBreakthrough(); break;
         case 'reborn': triggerReborn(); break;
         case 'unequip': unequip(el.dataset.slot); break;
+        case 'enhance-equip': enhanceEquip(el.dataset.slot); break;
         case 'stop-hangup': stopHangup(); break;
         case 'hangup': stopActivity(); startHangup(Number(el.dataset.map)); break;   // 开战前先停生产（二者互斥）
         case 'start-activity': stopHangup(); startActivity(el.dataset.id); break;     // 开工前先停战斗

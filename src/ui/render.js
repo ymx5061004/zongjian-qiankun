@@ -5,7 +5,7 @@
 // ============================================================
 import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix, levelFromExp, expForLevel } from '../domain.js';
+import { computeStats, getRealmName, generateItemByMatrix, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost } from '../domain.js';
 import { formatNumber } from '../util.js';
 
 // ---------- 浮动提示 tooltip ----------
@@ -36,21 +36,28 @@ function generateHtmlColumn(info, titlePrefix = "", isCurrentlyEquipped = false)
         html += `<div class="tooltip-desc">【功效】:<br>${dynamicDesc}</div>`;
     } else {
         const qColor = QUALITY_COLORS[info.quality || 0] || "#7f8c8d";
-        html += `<div class="tooltip-title" style="color:${qColor}">${titlePrefix}${info.name}</div>`;
+        const enh = info.enhance || 0;
+        const em = 1 + enh * BALANCE.enhance.perLevel;
+        html += `<div class="tooltip-title" style="color:${qColor}">${titlePrefix}${info.name}${enh ? ` <span style="color:var(--color-gold)">+${enh}</span>` : ''}</div>`;
         html += `<div class="tooltip-attr"><span>品阶质量:</span><span style="color:${qColor}">${QUALITY_NAMES[info.quality || 0] || '未知'}</span></div>`;
+        if (enh) html += `<div class="tooltip-attr"><span>强化等级:</span><span style="color:var(--color-gold)">+${enh}（攻防血 ×${em.toFixed(2)}）</span></div>`;
         html += `<div class="tooltip-attr"><span>回收碎银:</span><span style="color:var(--color-gold)">${info.price} 文</span></div>`;
         html += `<hr style="border:0; border-top:1px dashed #222; margin:6px 0;">`;
 
+        // 攻/防/血受强化放大(与 computeStats 同源)，暴击/闪避不受影响
         const fields = [
-            { k: 'atk', n: '攻击力', c: 'var(--color-accent)' },
-            { k: 'def', n: '防御力', c: 'var(--color-blue)' },
-            { k: 'hp', n: '气血总量', c: 'var(--color-success)' },
+            { k: 'atk', n: '攻击力', c: 'var(--color-accent)', enh: true },
+            { k: 'def', n: '防御力', c: 'var(--color-blue)', enh: true },
+            { k: 'hp', n: '气血总量', c: 'var(--color-success)', enh: true },
             { k: 'crit', n: '暴击率', c: 'var(--color-orange)', s: '%' },
             { k: 'dodge', n: '闪避率', c: 'var(--color-success)', s: '%' }
         ];
         fields.forEach(f => {
             const val = info[f.k] || 0;
-            if (val > 0) html += `<div class="tooltip-attr"><span>${f.n}:</span><span style="color:${f.c}">+${val}${f.s || ''}</span></div>`;
+            if (val > 0) {
+                const show = f.enh ? Math.floor(val * em) : val;
+                html += `<div class="tooltip-attr"><span>${f.n}:</span><span style="color:${f.c}">+${show}${f.s || ''}</span></div>`;
+            }
         });
     }
     html += `</div>`;
@@ -61,9 +68,14 @@ function generateDiffColumn(curItem, eqItem) {
     let html = `<div class="tooltip-column diff-column">`;
     html += `<div class="tooltip-title" style="color:#aaa;">🔀 变更对比</div>`;
     const fields = [{ k: 'atk', n: '攻击' }, { k: 'def', n: '防御' }, { k: 'hp', n: '气血' }, { k: 'crit', n: '暴击' }, { k: 'dodge', n: '闪避' }];
+    // 攻/防/血按各自强化等级放大后再比（与主列、computeStats 同源）——否则把已强化的在装备低估、误导升/降级判断
+    const per = BALANCE.enhance.perLevel;
+    const enhScaled = { atk: 1, def: 1, hp: 1 };
+    const curEm = 1 + (curItem.enhance || 0) * per;
+    const eqEm = 1 + (eqItem ? (eqItem.enhance || 0) : 0) * per;
     fields.forEach(f => {
-        const curVal = curItem[f.k] || 0;
-        const eqVal = eqItem ? (eqItem[f.k] || 0) : 0;
+        const curVal = enhScaled[f.k] ? Math.floor((curItem[f.k] || 0) * curEm) : (curItem[f.k] || 0);
+        const eqVal = !eqItem ? 0 : (enhScaled[f.k] ? Math.floor((eqItem[f.k] || 0) * eqEm) : (eqItem[f.k] || 0));
         const diff = curVal - eqVal;
         if (diff > 0) html += `<div class="tooltip-attr"><span>${f.n}:</span><span class="compare-tag comp-up">▲ +${diff}</span></div>`;
         else if (diff < 0) html += `<div class="tooltip-attr"><span>${f.n}:</span><span class="compare-tag comp-down">▼ ${diff}</span></div>`;
@@ -252,7 +264,7 @@ export function updatePlayerAttributes() {
         const el = document.getElementById(`eq-${s}`);
         const container = document.getElementById(`slot-container-${s}`);
         if (eq) {
-            el.innerText = eq.name; el.className = `q-${eq.quality}`;
+            el.innerText = eq.name + (eq.enhance ? ` +${eq.enhance}` : ''); el.className = `q-${eq.quality}`;
             container.setAttribute('data-tip', JSON.stringify(eq));
         } else {
             el.innerText = `空`; el.className = "q-0";
@@ -496,6 +508,58 @@ export function renderWarehouse() {
     });
 }
 
+// ---------- 神兵强化页（用锭+碎银强化已装备的装备）----------
+const ENHANCE_SLOTS = [
+    ['weapon', '兵刃'], ['subweapon', '暗器'], ['armor', '防具'],
+    ['helm', '头盔'], ['ring', '配饰'], ['artifact', '法宝']
+];
+export function renderEnhance() {
+    const player = state.player;
+    const box = document.getElementById('enhance-slots');
+    if (box) {
+        const maxEm = (1 + BALANCE.enhance.maxLevel * BALANCE.enhance.perLevel).toFixed(2);
+        const tip = `<div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-bottom:10px;">每 +1 让该装备「攻/防/血」×(1+${BALANCE.enhance.perLevel}·N)，最高 +${BALANCE.enhance.maxLevel}（满级 ×${maxEm}）。越高 +级越吃高级锭——黑市/战斗都给不了，只能挖矿熔炼来堆。</div>`;
+        box.innerHTML = tip + ENHANCE_SLOTS.map(([slot, label]) => {
+            const it = player.equips[slot];
+            if (!it) {
+                return `<div class="act-card locked"><div class="act-head"><span class="act-title">【${label}】</span><span style="color:var(--text-muted);font-size:12px;">— 未装备 —</span></div></div>`;
+            }
+            const lv = it.enhance || 0;
+            const em = 1 + lv * BALANCE.enhance.perLevel;
+            const qC = QUALITY_COLORS[it.quality || 0] || '#7f8c8d';
+            const statNow = ['atk', 'def', 'hp'].filter(k => it[k])
+                .map(k => `${({ atk: '攻', def: '防', hp: '血' })[k]} ${Math.floor(it[k] * em)}`).join('　') || '无主属性';
+            const cost = enhanceCost(it);
+            let btn, costLine;
+            if (!cost) {
+                btn = `<button class="btn" disabled>已满强化</button>`;
+                costLine = `已达上限 +${BALANCE.enhance.maxLevel}`;
+            } else {
+                const have = player.materials[cost.ingotKey] || 0;
+                const okMat = have >= cost.ingotQty, okCoin = player.coin >= cost.coin;
+                const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
+                const matCol = okMat ? 'var(--color-success)' : 'var(--color-accent)';
+                const coinCol = okCoin ? 'var(--color-gold)' : 'var(--color-accent)';
+                costLine = `升 +${cost.targetLevel} 需 <span style="color:${matCol}">${matName}×${cost.ingotQty}(有${formatNumber(have)})</span> · <span style="color:${coinCol}">碎银 ${formatNumber(cost.coin)}</span>`;
+                btn = `<button class="btn btn-success" data-act="enhance-equip" data-slot="${slot}" ${okMat && okCoin ? '' : 'disabled'}>⚒ 强化 +${cost.targetLevel}</button>`;
+            }
+            return `<div class="act-card ${lv > 0 ? 'running' : ''}">
+                <div class="act-head"><span class="act-title" style="color:${qC}">【${label}】${it.name}${lv ? ` <b style="color:var(--color-gold)">+${lv}</b>` : ''}</span>${btn}</div>
+                <div class="act-meta">当前 ${statNow}（强化倍率 ×${em.toFixed(2)}）<br>${costLine}</div>
+            </div>`;
+        }).join('');
+    }
+    // 锻材库存：只列「锭」（强化燃料），并提示去哪备料
+    const matBox = document.getElementById('enhance-mats');
+    if (matBox) {
+        const keys = Object.keys(MATERIALS).filter(k => k.startsWith('ingot_') && (player.materials[k] || 0) > 0);
+        matBox.innerHTML = keys.length
+            ? `<div class="wh-grid">` + keys.map(k =>
+                `<div class="wh-item"><div class="wh-ico">${MATERIALS[k].icon}</div>${MATERIALS[k].name}<br><span class="wh-qty">${formatNumber(player.materials[k])}</span></div>`).join('') + `</div>`
+            : `<div class="wh-empty">— 暂无锭。去「采矿」挖矿、「锻造」熔炼成锭，再回来强化神兵 —</div>`;
+    }
+}
+
 // ---------- 左侧菜单抽屉开关（仅移动端 ≤768 生效：桌面侧栏常驻、无 .open 类，调用无副作用）----------
 export function toggleMenu() {
     const sb = document.getElementById('nav-sidebar');
@@ -523,6 +587,7 @@ export function switchPage(pageId, tabEl) {
     if (pageId === 'bag') { renderForge(); renderBag(); } // renderBag：补刷挂机期间打造入袋的装备
     if (pageId === 'guide') renderGuide();
     if (pageId === 'mining' || pageId === 'smithing') { renderProduction(); renderWarehouse(); }
+    if (pageId === 'enhance') renderEnhance();
 }
 
 // ---------- 江湖秘典：游戏全机制说明（只读静态页）----------

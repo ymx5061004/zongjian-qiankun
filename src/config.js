@@ -125,6 +125,19 @@ export const BALANCE = {
         maxLevel: 99,                         // 生产技能等级上限
         expC: 50, expP: 2,                    // 升级累计经验曲线: 到达 L 级所需累计经验 = expC * (L-1)^expP
         offlineCapMs: 12 * 3600 * 1000        // 离线最多结算 12 小时
+    },
+
+    // —— 神兵强化（采矿/锻造的核心产出口：用锭+碎银强化已装备的装备）——
+    // ⚖️ 平衡旋钮(待试玩后调，全在这一处)：当前成本随目标级线性涨(ingotQty=目标级)，
+    //    故高档锭(玄晶/+16~18)是有意的"终局长草"瓶颈、低档锭前期会富余——若试玩觉得高段太肝，
+    //    可把 enhanceCost 的 ingotQty 改缓(如 Math.ceil(target/3))、或把 levelsPerTier 改成不对称分档、
+    //    或调 coinPerLevel 与品阶系数。强化与敌人 2^关 缩放的配速也在这里权衡。
+    enhance: {
+        perLevel: 0.08,            // 每 +1：该装备 攻/防/血 基础值 ×(1 + 0.08*N)，不影响暴击/闪避
+        maxLevel: 18,              // 强化上限 +18（满级 ×2.44）
+        levelsPerTier: 3,          // 每 3 级跨一档锭(越高级强化越吃高级锭 → 逼着往深矿挖)
+        coinPerLevel: 400,         // 单次碎银 = 目标级 * 400 * (品阶+1)
+        ingotTiers: ['ingot_copper', 'ingot_iron', 'ingot_xuan', 'ingot_cold', 'ingot_star', 'ingot_jade']
     }
 };
 
@@ -174,10 +187,7 @@ export const ACTIVITIES = [
     { id: "smelt_cold",   prof: "smithing", tier: 4, name: "熔炼寒铁锭", levelReq: 40, durationMs: 4000, exp: 58,  inputs: { ore_cold: 2 },   outputs: { ingot_cold: 1 } },
     { id: "smelt_star",   prof: "smithing", tier: 5, name: "熔炼星陨锭", levelReq: 60, durationMs: 4500, exp: 85,  inputs: { ore_star: 2 },   outputs: { ingot_star: 1 } },
     { id: "smelt_jade",   prof: "smithing", tier: 6, name: "熔炼玄晶锭", levelReq: 80, durationMs: 5000, exp: 128, inputs: { ore_jade: 2 },   outputs: { ingot_jade: 1 } },
-    // —— 锻造·打造神兵（锭 → 随机装备进背包，喂战斗/装备系统。背包满时打造品自动熔炼成碎银，不浪费工时）——
-    { id: "forge_gear_copper", prof: "smithing", tier: 2, name: "打造凡铁神兵", levelReq: 5,  durationMs: 6000, exp: 40,  inputs: { ingot_copper: 3 }, craftItem: 8 },
-    { id: "forge_gear_iron",   prof: "smithing", tier: 3, name: "打造精铁神兵", levelReq: 18, durationMs: 6500, exp: 65,  inputs: { ingot_iron: 3 },   craftItem: 16 },
-    { id: "forge_gear_xuan",   prof: "smithing", tier: 4, name: "打造玄铁神兵", levelReq: 32, durationMs: 7000, exp: 95,  inputs: { ingot_xuan: 3 },   craftItem: 28 },
-    { id: "forge_gear_cold",   prof: "smithing", tier: 5, name: "打造寒铁神兵", levelReq: 50, durationMs: 7500, exp: 130, inputs: { ingot_cold: 3 },   craftItem: 42 },
-    { id: "forge_gear_star",   prof: "smithing", tier: 6, name: "打造星陨神兵", levelReq: 68, durationMs: 8000, exp: 170, inputs: { ingot_star: 3 },   craftItem: 56 }
+    // 注：锭不再用来「打造随机装备」(那与黑市/战斗爆装重复、毫无意义)。
+    // 锭的唯一出口 = 强化已装备的神兵(见 BALANCE.enhance 与 actions.enhanceEquip)——黑市买不到、战斗爆不出的垂直变强轴。
+    // (通用引擎仍支持 craftItem 类动作，暂未启用，保留备用。)
 ];

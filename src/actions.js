@@ -3,12 +3,12 @@
 // 粘合起来。校验、扣费、改 state、刷新界面、存档都在这里发生。
 // ============================================================
 import { state } from './state.js';
-import { BALANCE } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear } from './domain.js';
+import { BALANCE, MATERIALS } from './config.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
-    rollShopGoods, removeShopGood, skillBrief, skillDescText
+    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance
 } from './ui/render.js';
 import { saveGame } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -208,12 +208,18 @@ export async function useBagItem(idx) {
             { k: 'crit', n: '暴击', s: '%' }, { k: 'dodge', n: '闪避', s: '%' }
         ];
         const eq = player.equips[item.type];
+        // 攻/防/血按各自强化等级放大后再算/再比（与 tooltip、computeStats 同源），避免强化装备被低估、误导换装
+        const per = BALANCE.enhance.perLevel;
+        const enhScaled = { atk: 1, def: 1, hp: 1 };
+        const itEm = 1 + (item.enhance || 0) * per;
+        const eqEm = 1 + (eq ? (eq.enhance || 0) : 0) * per;
         const statParts = [];
         const diffParts = [];
         fields.forEach(f => {
-            const cur = item[f.k] || 0;
+            const cur = enhScaled[f.k] ? Math.floor((item[f.k] || 0) * itEm) : (item[f.k] || 0);
             if (cur) statParts.push(`${f.n} +${cur}${f.s || ''}`);
-            const diff = cur - (eq ? (eq[f.k] || 0) : 0);
+            const eqVal = !eq ? 0 : (enhScaled[f.k] ? Math.floor((eq[f.k] || 0) * eqEm) : (eq[f.k] || 0));
+            const diff = cur - eqVal;
             if (diff > 0) diffParts.push(`<span style="color:var(--color-success)">${f.n} ▲+${diff}${f.s || ''}</span>`);
             else if (diff < 0) diffParts.push(`<span style="color:var(--color-accent)">${f.n} ▼${diff}${f.s || ''}</span>`);
         });
@@ -268,6 +274,31 @@ export async function useBagItem(idx) {
         updatePlayerAttributes();
         saveGame();
     }
+}
+
+// —— 神兵强化：用锭+碎银把「已装备」的装备 +1（永久放大攻/防/血）。
+//    采矿/锻造的核心产出口——黑市买不到、战斗爆不出，只能靠挖矿熔锭来堆。——
+export function enhanceEquip(slot) {
+    const player = state.player;
+    const item = player.equips[slot];
+    if (!item) { toast("该部位尚未装备，无法强化。", 'error'); return; }
+    const cost = enhanceCost(item);
+    if (!cost) { toast(`【${item.name}】已达强化上限 +${BALANCE.enhance.maxLevel}。`, 'error'); return; }
+    const have = player.materials[cost.ingotKey] || 0;
+    const matName = MATERIALS[cost.ingotKey].name;
+    if (have < cost.ingotQty) { toast(`${matName}不足：需 ${cost.ingotQty}，现有 ${have}。去采矿→熔炼备料。`, 'error'); return; }
+    if (player.coin < cost.coin) { toast(`碎银不足：强化需 ${cost.coin} 文。`, 'error'); return; }
+
+    player.materials[cost.ingotKey] -= cost.ingotQty;
+    if (player.materials[cost.ingotKey] <= 0) delete player.materials[cost.ingotKey];
+    player.coin -= cost.coin;
+    item.enhance = (item.enhance || 0) + 1;
+
+    hideTooltip();
+    renderEnhance();
+    updatePlayerAttributes();   // 重算战力(强化已反映到 computeStats)+刷新顶栏碎银/装备名+N
+    saveGame();
+    toast(`⚒️ 强化成功！【${item.name}】精炼至 +${item.enhance}。`, 'success');
 }
 
 // —— 卸下装备 ——
