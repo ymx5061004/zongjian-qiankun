@@ -11,8 +11,30 @@ export const MATRIX_ITEMS = {
     armor: ["布衣", "皮甲", "链甲", "玄武重铠", "金丝软甲", "流光战袍", "太极道衣", "九天神魔仙衣"],
     helm: ["头巾", "皮帽", "精铁盔", "紫金冠", "凤翅玲珑盔", "大罗天御冕", "混元无极发冠"],
     ring: ["铜指环", "骨质项链", "青玉佩", "龙纹扳指", "乾坤避毒符", "大罗天魂坠", "混沌鸿蒙神印"],
-    artifact: ["炼妖壶", "东皇钟", "昆仑镜", "神农鼎", "山河社稷图", "七宝妙树", "太极图", "诛仙剑阵图"]
+    artifact: ["炼妖壶", "东皇钟", "昆仑镜", "神农鼎", "山河社稷图", "七宝妙树", "太极图", "诛仙剑阵图"],
+    amulet: ["平安符", "长命锁", "护身玉牌", "观音玉坠", "辟邪铃", "九转护魂符", "太一护身符箓"],
+    gloves: ["皮护腕", "铁护手", "玄铁臂甲", "龙鳞手套", "金刚护腕", "拨云擒龙手", "混元护法金刚套"],
+    boots:  ["麻布鞋", "软底快靴", "铁芒靴", "踏云靴", "风火轮靴", "凌波微步靴", "纵地金光神行靴"]
 };
+
+// ============================================================
+// 装备部位「唯一权威清单」(原先散落在 render/battle 的 4 份硬编码列表，统一到此)。
+//   key: 部位标识(= 装备 item.type、equips 的键、makeGearPiece 的 case)；
+//   label: 中文名；realmReq: 解锁所需 realmLevel(数值，1=开局即有)。
+// 加新部位 = 这里加一条 + MATRIX_ITEMS 给名 + makeGearPiece 加 case + index.html 加一行槽位。
+// 新部位按境界逐步解锁(realmReq>1)，给战力膨胀一个节奏；未解锁的部位不掉落/不可打造/不可装备。
+// ============================================================
+export const GEAR_SLOTS = [
+    { key: 'weapon',    label: '兵刃', realmReq: 1 },
+    { key: 'subweapon', label: '暗器', realmReq: 1 },
+    { key: 'armor',     label: '防具', realmReq: 1 },
+    { key: 'helm',      label: '头盔', realmReq: 1 },
+    { key: 'ring',      label: '配饰', realmReq: 1 },
+    { key: 'artifact',  label: '法宝', realmReq: 1 },
+    { key: 'amulet',    label: '护符', realmReq: 11 },  // 先天解锁(暴击/血)
+    { key: 'gloves',    label: '护腕', realmReq: 21 },  // 宗师解锁(攻击/暴击)
+    { key: 'boots',     label: '战靴', realmReq: 31 }   // 大宗师解锁(闪避/血)
+];
 
 export const QUALITY_NAMES = ["凡品", "良品", "上品", "精品", "史诗", "神话"];
 // 品阶配色（原来散落在 tooltip 里的魔法数组，统一到此处）

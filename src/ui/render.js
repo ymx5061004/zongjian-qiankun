@@ -3,14 +3,14 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots } from '../domain.js';
 import { formatNumber } from '../util.js';
 
 // 装备 6 部位键与中文名（打造/强化/黑市/对比共用）
-const GEAR_SLOT_KEYS = ['weapon', 'subweapon', 'armor', 'helm', 'ring', 'artifact'];
-const GEAR_SLOT_LABEL = { weapon: '兵刃', subweapon: '暗器', armor: '防具', helm: '头盔', ring: '配饰', artifact: '法宝' };
+// 部位中文名从 config.GEAR_SLOTS 派生（含全部部位）。加部位只改 config，渲染自动跟随。
+const GEAR_SLOT_LABEL = Object.fromEntries(GEAR_SLOTS.map(s => [s.key, s.label]));
 
 // ---------- 浮动提示 tooltip ----------
 export function hideTooltip() {
@@ -271,10 +271,20 @@ export function updatePlayerAttributes() {
     document.getElementById('global-reborn').innerText = player.rebornCount;
     document.getElementById('sprite-p-name').innerText = player.name;
 
-    ['weapon', 'subweapon', 'armor', 'helm', 'ring', 'artifact'].forEach(s => {
+    GEAR_SLOTS.forEach(({ key: s, realmReq }) => {
         const eq = player.equips[s];
         const el = document.getElementById(`eq-${s}`);
         const container = document.getElementById(`slot-container-${s}`);
+        if (!el || !container) return;                 // 该部位 HTML 槽位不存在则跳过
+        const unequipBtn = container.querySelector('[data-act="unequip"]');
+        // 未到解锁境界且该槽为空：灰显需求、隐藏卸下按钮（已装备的边界——如轮回回退境界——仍正常显示+可卸）
+        if (player.realmLevel < realmReq && !eq) {
+            el.innerText = `未解锁（需${getRealmName(realmReq)}）`; el.className = "q-0";
+            container.removeAttribute('data-tip');
+            if (unequipBtn) unequipBtn.style.display = 'none';
+            return;
+        }
+        if (unequipBtn) unequipBtn.style.display = '';
         if (eq) {
             el.innerText = eq.name + (eq.enhance ? ` +${eq.enhance}` : ''); el.className = `q-${eq.quality}`;
             container.setAttribute('data-tip', JSON.stringify(eq));
@@ -329,9 +339,10 @@ export function rollShopGoods() {
     const skillCount = shopGoods.length ? 2 : 3; // 出了孤本则普通货位 6→5（孤本占掉一个秘籍位）
     // 黑市只卖「凡铁/精铁」低档基础套装件(前期启动用)——不再卖随机高档装、刷新也刷不出顶配，
     // 杜绝「刷钱→刷新→买顶装」。中后期装备靠自己打造/掉落(见打造图谱与后续掉落改造)。
+    const slotPool = unlockedGearSlots(player.realmLevel); // 黑市只卖已解锁部位，避免买到装不了的件
     for (let i = 0; i < 3; i++) {
         const lowTier = 1 + Math.floor(Math.random() * 2); // 1=凡铁 / 2=精铁
-        const slot = GEAR_SLOT_KEYS[Math.floor(Math.random() * GEAR_SLOT_KEYS.length)];
+        const slot = slotPool[Math.floor(Math.random() * slotPool.length)].key;
         shopGoods.push({ kind: 'item', obj: makeGearPiece(lowTier, slot, rollQuality()) });
     }
     for (let i = 0; i < skillCount; i++) {
@@ -556,17 +567,13 @@ export function renderWarehouse() {
 }
 
 // ---------- 神兵强化页（用锭+碎银强化已装备的装备）----------
-const ENHANCE_SLOTS = [
-    ['weapon', '兵刃'], ['subweapon', '暗器'], ['armor', '防具'],
-    ['helm', '头盔'], ['ring', '配饰'], ['artifact', '法宝']
-];
 export function renderEnhance() {
     const player = state.player;
     const box = document.getElementById('enhance-slots');
     if (box) {
         const maxEm = (1 + BALANCE.enhance.maxLevel * BALANCE.enhance.perLevel).toFixed(2);
         const tip = `<div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-bottom:10px;">每 +1 让该装备「攻/防/血」×(1+${BALANCE.enhance.perLevel}·N)，最高 +${BALANCE.enhance.maxLevel}（满级 ×${maxEm}）。越高 +级越吃高级锭——黑市/战斗都给不了，只能挖矿熔炼来堆。</div>`;
-        box.innerHTML = tip + ENHANCE_SLOTS.map(([slot, label]) => {
+        box.innerHTML = tip + unlockedGearSlots(player.realmLevel).map(({ key: slot, label }) => {
             const it = player.equips[slot];
             if (!it) {
                 return `<div class="act-card locked"><div class="act-head"><span class="act-title">【${label}】</span><span style="color:var(--text-muted);font-size:12px;">— 未装备 —</span></div></div>`;
@@ -635,8 +642,9 @@ export function renderCraft() {
     const cost = gearCraftCost(selectedCraftTier);
     const have = player.materials[cost.ingotKey] || 0;
     const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
-    const setLine = `<div class="prof-exp-text" style="margin-bottom:10px;">完整 ${T.name} 套装(6 件)：耗 ${matName}×${cost.ingotQty * 6} + 碎银 ${formatNumber(cost.coin * 6)}（强化另计）</div>`;
-    box.innerHTML = setLine + GEAR_SLOT_KEYS.map(slot => {
+    const slots = unlockedGearSlots(player.realmLevel);
+    const setLine = `<div class="prof-exp-text" style="margin-bottom:10px;">完整 ${T.name} 套装(${slots.length} 件)：耗 ${matName}×${cost.ingotQty * slots.length} + 碎银 ${formatNumber(cost.coin * slots.length)}（强化另计）</div>`;
+    box.innerHTML = setLine + slots.map(({ key: slot }) => {
         const pv = makeGearPiece(selectedCraftTier, slot, 0); // 预览(凡品成色)属性
         const statStr = ['atk', 'def', 'hp', 'crit', 'dodge'].filter(k => pv[k])
             .map(k => `${({ atk: '攻', def: '防', hp: '血', crit: '暴', dodge: '闪' })[k]} ${pv[k]}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('　');

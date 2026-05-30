@@ -5,7 +5,7 @@
 // 仅作防篡改/防随手改档的混淆 —— 密钥就在前端源码里，非机密级保护。
 // ============================================================
 import { state, makeDefaultPlayer } from './state.js';
-import { SKILL_SUFFIXES } from './config.js';
+import { SKILL_SUFFIXES, GEAR_SLOTS } from './config.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
 const SAVE_VERSION = 3;
@@ -36,6 +36,9 @@ export function normalizePlayer(parsed) {
     // 校验到 exp 必须是有限数：旧档/损坏档里 professions[k] 缺 exp 会让后续 exp+= 变 NaN
     ['mining', 'smithing'].forEach(k => { if (!p.professions[k] || !Number.isFinite(p.professions[k].exp)) p.professions[k] = { exp: 0 }; });
     if (!p.materials || typeof p.materials !== 'object') p.materials = {};
+    // 装备槽防御性补全：旧档 equips 缺新部位键(amulet/gloves/boots…)时补 null，避免读取/渲染时的边界
+    if (!p.equips || typeof p.equips !== 'object') p.equips = {};
+    GEAR_SLOTS.forEach(s => { if (!(s.key in p.equips)) p.equips[s.key] = null; });
     if (p.activity === undefined) p.activity = null;
     // lastTickTime 缺失/非法时设为当前时刻：否则离线结算会因 last=0 被整段跳过（旧档升级尤甚）
     if (!Number.isFinite(p.lastTickTime) || p.lastTickTime <= 0) p.lastTickTime = Date.now();

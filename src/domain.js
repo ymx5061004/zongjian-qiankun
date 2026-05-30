@@ -4,7 +4,7 @@
 // ============================================================
 import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
-    COMBAT_AFFIX_KEYS
+    COMBAT_AFFIX_KEYS, GEAR_SLOTS
 } from './config.js';
 
 // —— 境界名 ——
@@ -214,6 +214,10 @@ export function makeGearPiece(tier, slot, quality = 0) {
         case "helm":      def = Math.floor(6 * p);  hp = Math.floor(40 * p); break;
         case "ring":      hp = Math.floor(80 * p);  if (tier >= 3) dodge = Math.min(75, Math.floor(tier * 1.2)); break;
         case "artifact":  atk = Math.floor(10 * p); def = Math.floor(6 * p); hp = Math.floor(60 * p); if (tier >= 4) { crit = tier; dodge = tier; } break;
+        // —— 新增部位(按境界解锁，见 GEAR_SLOTS.realmReq) ——
+        case "amulet":    hp = Math.floor(30 * p); if (tier >= 2) crit = Math.floor(tier * 3); if (tier >= 4) atk = Math.floor(6 * p); break; // 护符：暴击/血
+        case "gloves":    atk = Math.floor(14 * p); if (tier >= 3) crit = Math.floor(tier * 1.8); break;                                    // 护腕：攻击/暴击
+        case "boots":     hp = Math.floor(45 * p); def = Math.floor(4 * p); if (tier >= 2) dodge = Math.min(75, Math.floor(tier * 1.5)); break; // 战靴：闪避/血
         default: return null;
     }
     return {
@@ -222,6 +226,11 @@ export function makeGearPiece(tier, slot, quality = 0) {
         type: slot, tier, quality, atk, def, hp, crit, dodge,
         price: Math.floor(BALANCE.itemPrice.base * Math.pow(BALANCE.itemPrice.growth, quality))
     };
+}
+
+// 当前境界已解锁的装备部位（按 GEAR_SLOTS.realmReq 过滤）。掉落/打造/装备共用，保证不出现「拿到却装不了」的部位。
+export function unlockedGearSlots(realmLevel) {
+    return GEAR_SLOTS.filter(s => (realmLevel || 1) >= s.realmReq);
 }
 
 // 打造「一件」装备的花费（按档）。返回 {ingotKey, ingotQty, coin} 或 null。

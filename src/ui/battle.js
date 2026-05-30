@@ -5,11 +5,9 @@
 import { state } from '../state.js';
 import { BALANCE, MAP_NAMES, GEAR_TIERS, MATERIALS } from '../config.js';
 import { formatNumber } from '../util.js';
-import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality } from '../domain.js';
+import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality, unlockedGearSlots } from '../domain.js';
 import { renderBag, renderMapList, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
-
-const BATTLE_SLOT_KEYS = ['weapon', 'subweapon', 'armor', 'helm', 'ring', 'artifact'];
 
 // 敌人火柴人 SVG（与原版一致）
 const ENEMY_SVG = `
@@ -154,7 +152,8 @@ function executeLoopBattle(mapId) {
         // 低概率额外掉「该区域档位」的装备(成色随机)——锦上添花，不再是越级随机神装(顶配仍需自己打造/后期副本)
         const gearChance = BALANCE.reward.baseDrop * (stats.dropRate / 100);
         if (Math.random() < gearChance && player.bag.length < player.bagMax) {
-            const newItem = makeGearPiece(regionTier, BATTLE_SLOT_KEYS[Math.floor(Math.random() * BATTLE_SLOT_KEYS.length)], rollQuality());
+            const slotPool = unlockedGearSlots(player.realmLevel); // 只掉已解锁部位
+            const newItem = makeGearPiece(regionTier, slotPool[Math.floor(Math.random() * slotPool.length)].key, rollQuality());
             player.bag.push(newItem);
             bonus += `，夺得 [${newItem.name}]`;
             // 拖拽进行中不重渲背包：否则会销毁正被拖动的源节点、触发 pointercancel 中止拖拽。

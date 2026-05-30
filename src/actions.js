@@ -3,7 +3,7 @@
 // 粘合起来。校验、扣费、改 state、刷新界面、存档都在这里发生。
 // ============================================================
 import { state } from './state.js';
-import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES } from './config.js';
+import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES, GEAR_SLOTS } from './config.js';
 import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
@@ -24,9 +24,11 @@ export function playerBreakthrough() {
     player.baseHp += BALANCE.breakthrough.hpGain;
     player.baseAtk += BALANCE.breakthrough.atkGain;
     player.baseDef += BALANCE.breakthrough.defGain;
+    const unlockedSlot = GEAR_SLOTS.find(s => s.realmReq === player.realmLevel); // 本次突破是否恰好解锁新部位
     updatePlayerAttributes();
     renderMapList();
     saveGame();
+    if (unlockedSlot) toast(`🎉 突破${getRealmName(player.realmLevel)}，解锁新装备部位【${unlockedSlot.label}】！`, 'success');
 }
 
 // —— 渡劫轮回（异步确认）——
@@ -276,6 +278,8 @@ export async function useBagItem(idx) {
         toast(`成功熔炼，获得碎银 ${item.price} 文。`, 'success');
     } else if (action === "1") {
         if (item.type !== "book") {
+            const slotDef = GEAR_SLOTS.find(s => s.key === item.type);
+            if (slotDef && player.realmLevel < slotDef.realmReq) { toast(`需突破至${getRealmName(slotDef.realmReq)}才能装备【${slotDef.label}】。`, 'error'); return; }
             const old = player.equips[item.type];
             player.equips[item.type] = item;
             if (old) player.bag[curIdx] = old; else player.bag.splice(curIdx, 1);

@@ -10,7 +10,7 @@ export function makeDefaultPlayer() {
         name: "", realmLevel: 1, exp: 0, coin: 50000, rebornCount: 0,
         baseHp: 250, baseAtk: 35, baseDef: 15, baseCrit: 5, baseDodge: 5,
         honghuangPower: 0,
-        equips: { weapon: null, subweapon: null, armor: null, helm: null, ring: null, artifact: null },
+        equips: { weapon: null, subweapon: null, armor: null, helm: null, ring: null, artifact: null, amulet: null, gloves: null, boots: null },
         bag: [], bagMax: 16,           // 默认16格；扩容靠黑市常驻购买（见 BALANCE.bag / domain.bagExpandCost）
         skills: [],
         currentMapId: null,
