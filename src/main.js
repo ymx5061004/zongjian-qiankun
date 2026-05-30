@@ -12,6 +12,7 @@ import {
     renderMapList, renderPlayerSkills, renderShopGoods
 } from './ui/render.js';
 import { startHangup, stopHangup } from './ui/battle.js';
+import { initDragDrop } from './ui/drag.js';
 import { toast } from './ui/dialog.js';
 import {
     playerBreakthrough, triggerReborn, unequip,
@@ -107,6 +108,7 @@ function onDelegatedClick(e) {
 function init() {
     loadGame();
     initTooltipEvent();
+    initDragDrop();
     if (!state.player.name || state.player.name.trim() === "") {
         document.getElementById('create-role-overlay').style.display = 'flex';
     } else {

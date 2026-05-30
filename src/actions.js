@@ -93,6 +93,32 @@ export function removeFromForge(idx) {
     }
 }
 
+// —— 拖拽：把背包物品放入指定洪炉槽（该槽已占用则与背包原格交换）——
+export function dropBagToForge(bagIdx, slotIdx) {
+    const player = state.player;
+    const item = player.bag[bagIdx];
+    if (!item) return;
+    const existing = state.forgeItems[slotIdx];
+    state.forgeItems[slotIdx] = item;
+    if (existing) player.bag[bagIdx] = existing; // 交换：旧炉中物回到这一背包格
+    else player.bag.splice(bagIdx, 1);
+    hideTooltip();
+    renderForge();
+    renderBag();
+    saveGame();
+}
+
+// —— 拖拽：交换两个洪炉槽（含一空一满时的"移动"）——
+export function swapForge(a, b) {
+    if (a === b) return;
+    const t = state.forgeItems[a];
+    state.forgeItems[a] = state.forgeItems[b];
+    state.forgeItems[b] = t;
+    hideTooltip();
+    renderForge();
+    saveGame();
+}
+
 export function executeForge() {
     const player = state.player;
     const i1 = state.forgeItems[0];

@@ -94,6 +94,7 @@ function buildTooltipHtml(target) {
 }
 
 function showTooltip(target, tipNode) {
+    if (document.body.classList.contains('dragging-active')) return; // 拖拽中不弹提示
     try {
         tipNode.innerHTML = buildTooltipHtml(target);
         tipNode.style.display = 'block';

@@ -81,6 +81,13 @@
         .q-hh { color: var(--color-honghuang); font-weight: bold; text-shadow: 0 0 8px rgba(255,51,102,0.6); }
         .forge-glow { box-shadow: 0 0 15px rgba(230,126,34,0.5); border-color: var(--color-orange) !important; }
 
+        /* —— 拖拽融合 —— */
+        .drag-ghost { position: fixed; left: 0; top: 0; width: 54px; height: 54px; transform: translate(-50%, -50%); pointer-events: none; z-index: 10000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; font-size: 11px; padding: 4px; box-sizing: border-box; overflow: hidden; background: #161616; border: 2px solid var(--color-gold); border-radius: 4px; box-shadow: 0 10px 24px rgba(0,0,0,0.7); opacity: 0.95; }
+        .item-slot.drag-source { opacity: 0.3; }
+        .drop-target { border-color: var(--color-success) !important; box-shadow: 0 0 16px rgba(46,204,113,0.75) !important; background: #14211a !important; }
+        #bag-grid.drop-target { background: none !important; box-shadow: none !important; outline: 2px dashed var(--color-success); outline-offset: 3px; border-radius: 4px; }
+        body.dragging-active, body.dragging-active * { cursor: grabbing !important; }
+
         .list-card { background: #111; border: 1px solid #222; padding: 12px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
         .prop-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; background: #111; padding: 6px 10px; border-radius: 4px; border: 1px solid #1a1a1a; position: relative; }
 
@@ -173,6 +180,10 @@
             /* 背包格子：每行 5 个，触摸尺寸 */
             .grid-container { grid-template-columns: repeat(5, 1fr); gap: 6px; }
             .item-slot { font-size: 10px; padding: 2px; }
+
+            /* 洪炉槽与融合按钮：index.html 内联写死 70px，这里覆盖为与背包格/浮影相称的尺寸，避免小屏整行溢出 */
+            #forge-slot-0, #forge-slot-1 { width: 58px !important; height: 58px !important; font-size: 11px !important; }
+            button[data-act="forge"] { height: 58px !important; padding: 0 16px !important; margin-left: 10px !important; font-size: 14px !important; }
 
             /* 列表卡片：按钮换行铺满，便于点按 */
             .list-card { flex-wrap: wrap; gap: 8px; padding: 12px 10px; }

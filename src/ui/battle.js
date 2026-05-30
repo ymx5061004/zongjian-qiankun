@@ -7,6 +7,7 @@ import { BALANCE, MAP_NAMES } from '../config.js';
 import { formatNumber } from '../util.js';
 import { finalizeEnemyStats, simulateBattle, generateItemByMatrix } from '../domain.js';
 import { renderBag, renderMapList, updatePlayerAttributes } from './render.js';
+import { isDragging } from './drag.js';
 
 // 敌人火柴人 SVG（与原版一致）
 const ENEMY_SVG = `
@@ -138,7 +139,9 @@ function executeLoopBattle(mapId) {
             const newItem = generateItemByMatrix(mapId);
             player.bag.push(newItem);
             bonus = ` 夺得战利品: [${newItem.name}]`;
-            renderBag();
+            // 拖拽进行中不重渲背包：否则会销毁正被拖动的源节点、触发 pointercancel 中止拖拽。
+            // 掉落物 push 在数组末尾不影响正在拖的索引；拖拽结束(落子或取消)会补刷背包。
+            if (!isDragging()) renderBag();
         }
         logBattle(`✨ 胜利！碎银+${formatNumber(coinG)}，修为+${formatNumber(expG)}。${bonus}`);
     } else {
