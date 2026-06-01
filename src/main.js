@@ -17,7 +17,7 @@ import { startHangup, stopHangup } from './ui/battle.js';
 import { startActivity, stopActivity, resumeActivityAfterLoad, showOfflineReport, pauseActivity } from './ui/idle.js';
 import { initDragDrop } from './ui/drag.js';
 import { toast } from './ui/dialog.js';
-import { checkAchievementsAndNotify, claimAchievementReward, renderAchievementPanel } from './ui/achievement.js';
+import { checkAchievementsAndNotify, claimAchievementReward, renderAchievementPanel, setAchievementFilter } from './ui/achievement.js';
 import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
@@ -131,6 +131,7 @@ function onDelegatedClick(e) {
         case 'buy-item': buyShopItem(Number(el.dataset.idx)); break;
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
         case 'claim-achievement': if (claimAchievementReward(el.dataset.id)) { updatePlayerAttributes(); checkAchievementsAndNotify('coin'); saveGame(); } break;
+        case 'filter-achievement': setAchievementFilter(el.dataset.cat); break;
         case 'claim-quest': claimGuideQuestReward(el.dataset.id); break;
         case 'select-path': selectCultivationPath(el.dataset.path); break;
         case 'use-bag': hideTooltip(); useBagItem(Number(el.dataset.idx)); break;

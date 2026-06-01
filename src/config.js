@@ -95,7 +95,10 @@ export const ACHIEVEMENT_CATEGORIES = {
     battle: "战斗成就",
     equip: "装备成就",
     skill: "秘籍成就",
-    wealth: "财富成就"
+    wealth: "财富成就",
+    challenge: "试炼成就",   // 第四阶段：挑战向（残血翻盘/极限一击…）
+    path: "流派成就",        // 第四阶段：流派向（各派专属里程碑）
+    funny: "江湖奇谈"        // 第四阶段：趣味/隐藏向
 };
 
 export const ACHIEVEMENTS = [
@@ -138,7 +141,37 @@ export const ACHIEVEMENTS = [
 
     // 财富成就
     { id: 'coin_10w', category: 'wealth', name: '小有资财', desc: '累计获得碎银100万文', target: 1000000, metric: 'totalCoinEarned', reward: { exp: 50000 } },
-    { id: 'coin_100w', category: 'wealth', name: '财富巨龙', desc: '累计获得碎银1000万文', target: 10000000, metric: 'totalCoinEarned', reward: { exp: 300000 } }
+    { id: 'coin_100w', category: 'wealth', name: '财富巨龙', desc: '累计获得碎银1000万文', target: 10000000, metric: 'totalCoinEarned', reward: { exp: 300000 } },
+
+    // ============================================================
+    // 第四阶段·策略向成就 + 永久小奖励（reward.perm：claimed 后由 computeStats 集中读取叠乘，绝不重复叠加）。
+    //   perm 字段（均为百分比）：all(五维) / atk / hp / def / crit / dodge / dropRate / coinRate。
+    //   hidden:true 未解锁时显示「？？？」+ hint；flavorText：解锁后的武侠寄语。复杂条件靠 achievements.stats 累计（见 domain.getCurrentMetricValue）。
+    // ============================================================
+    // 通用里程碑
+    { id: 'first_battle', category: 'battle', name: '初入江湖', desc: '完成第一次战斗（胜负皆可）', target: 1, metric: 'battleCount', reward: { coin: 2000, perm: { allPct: 0.5 } }, hint: '去「百关征途」随便打一场', flavorText: '初心一剑，江湖路远。' },
+    { id: 'breakthrough_first', category: 'challenge', name: '破境鸣金', desc: '完成第一次破境冲关', target: 1, metric: 'breakthroughCount', reward: { coin: 3000, perm: { atkPct: 1 } }, flavorText: '一朝破境，天地为之一宽。' },
+    { id: 'enhance_10', category: 'equip', name: '神兵微芒', desc: '神兵强化累计 10 次', target: 10, metric: 'enhanceCount', reward: { coin: 50000, perm: { atkPct: 1 } }, flavorText: '千锤百炼，神兵渐成微芒。' },
+
+    // 试炼向（挑战）
+    { id: 'armor_win', category: 'challenge', name: '披衣初成', desc: '穿戴防具取胜 1 次', target: 1, metric: 'armorWins', reward: { coin: 3000 }, hint: '装备一件防具后再取胜', flavorText: '甲胄在身，临阵不惧。' },
+    { id: 'lowhp_win', category: 'challenge', name: '残血反杀', desc: '在自身气血低于 20% 时取胜', target: 1, metric: 'lowHpWins', reward: { coin: 8000, perm: { critPct: 1 } }, hint: '濒死之际翻盘', flavorText: '置之死地而后生。' },
+    { id: 'big_hit', category: 'challenge', name: '孤注一掷', desc: '单次出手造成 10 万以上伤害', target: 100000, metric: 'maxSingleHit', reward: { coin: 10000, perm: { atkPct: 1 } }, flavorText: '一击，足矣。' },
+
+    // 流派向
+    { id: 'sword_wins', category: 'path', name: '初心初现', desc: '修「剑修」期间取胜 20 次', target: 20, metric: 'swordPathWins', reward: { coin: 10000, perm: { critPct: 1 } }, flavorText: '剑心通明，二十战不改其志。' },
+    { id: 'body_tank', category: 'path', name: '铁骨横江', desc: '修「体修」期间累计承受 50 万伤害', target: 500000, metric: 'bodyDamageTaken', reward: { coin: 10000, perm: { hpPct: 1 } }, flavorText: '千击不溃，是为金身。' },
+    { id: 'poison_kill', category: 'path', name: '毒入骨髓', desc: '修「毒修」期间以毒伤了结对手', target: 1, metric: 'poisonKills', reward: { coin: 8000, perm: { allPct: 0.5 } }, hint: '让中毒灼烧成为最后一击', flavorText: '附骨之蛆，无声夺命。' },
+    { id: 'agility_dodge', category: 'path', name: '踏雪无痕', desc: '战斗中累计闪避 100 次', target: 100, metric: 'dodgeCount', reward: { coin: 8000, perm: { allPct: 0.5 } }, flavorText: '来去如风，敌不能伤。' },
+    { id: 'artisan_craft', category: 'path', name: '千锤百炼', desc: '「打造图谱」打造装备累计 10 件', target: 10, metric: 'craftCount', reward: { coin: 8000, perm: { allPct: 0.5 } }, flavorText: '以器养道，匠心独运。' },
+
+    // 地图词缀向
+    { id: 'poisonmist_wins', category: 'map', name: '毒瘴不侵', desc: '在「毒瘴」词缀关卡取胜 5 次', target: 5, metric: 'poisonMistWins', reward: { coin: 20000, perm: { hpPct: 1 } }, flavorText: '瘴气如墨，我自巍然。' },
+    { id: 'spirit_exp', category: 'map', name: '灵脉钟秀', desc: '在「灵脉」词缀关卡累计获得 5 万修为', target: 50000, metric: 'spiritVeinExp', reward: { coin: 20000, perm: { coinRatePct: 1 } }, flavorText: '灵脉滋养，修为日进千里。' },
+
+    // 江湖奇谈（趣味 / 隐藏）
+    { id: 'high_quality', category: 'funny', name: '今天手气不错', desc: '获得一件史诗及以上品质的装备', target: 1, metric: 'gotHighQuality', reward: { coin: 5000 }, hint: '撞一回大运', flavorText: '时来天地皆同力。' },
+    { id: 'hidden_naked', category: 'funny', hidden: true, name: '赤手空拳', desc: '未装备兵刃却取胜 1 次', target: 1, metric: 'nakedWins', reward: { coin: 5000, perm: { allPct: 0.5 } }, hint: '???', flavorText: '手中无剑，心中有剑。' }
 ];
 
 export const epicStory = [

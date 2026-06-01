@@ -20,7 +20,7 @@ export function makeDefaultPlayer() {
         pillBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }, // 丹药永久根骨增益（服丹累加，跨轮回保留）
         activity: null,                // 当前挂机生产动作 id（与战斗挂机互斥）；存档保留以便读档续挂+离线结算
         lastTickTime: 0,               // 上次存活时间戳（saveGame 时刷新）；读档据此结算离线产出
-        achievements: { unlocked: [], claimed: [] },
+        achievements: { unlocked: [], claimed: [], stats: {} }, // stats: 策略向成就的累计计数（dodgeCount/winByPath/poisonKills…，按需建键）
         // —— 新手指引任务链（江湖指引）——
         // completed: 已达成任务 id；claimed: 已领奖 id；activeId: 当前推荐任务（由 domain.syncQuestProgress 计算）；
         // stats: 无法从其他状态派生、需累计的计数器（其余进度尽量从既有状态派生，见 domain.getQuestProgress）。

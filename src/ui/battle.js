@@ -104,7 +104,16 @@ function executeLoopBattle(mapId) {
     const eSprite = document.getElementById('sprite-enemy');
 
     // 纯逻辑算出整场战斗，再按节奏演出（env=地图词缀战斗环境）
-    const { win, events, poisonDealt } = simulateBattle(stats, enemy, player.skills, env);
+    const { win, events, poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct } = simulateBattle(stats, enemy, player.skills, env);
+
+    // —— 第四阶段·策略向成就统计累计（按战斗触发，非每帧扫描）——胜负皆累计的项目 ——
+    if (!player.achievements) player.achievements = { unlocked: [], claimed: [], stats: {} };
+    if (!player.achievements.stats) player.achievements.stats = {};
+    const as = player.achievements.stats;
+    const curPath = player.cultivationPath;
+    if (dodges) as.dodgeCount = (as.dodgeCount || 0) + dodges;                       // 踏雪无痕
+    if (maxHit > (as.maxSingleHit || 0)) as.maxSingleHit = maxHit;                   // 孤注一掷
+    if (curPath === 'body' && dmgTaken) as.bodyDamageTaken = (as.bodyDamageTaken || 0) + dmgTaken; // 铁骨横江
 
     events.forEach(ev => {
         const base = (ev.round - 1) * B.animStaggerMs;
@@ -186,6 +195,7 @@ function executeLoopBattle(mapId) {
             player.bag.push(newItem);
             bonus += `，夺得 [${newItem.name}]`;
             if (mapMod.id === 'sword_tomb' && newItem.type === 'weapon') player.swordTombWeapons = (player.swordTombWeapons || 0) + 1; // 成就：剑冢寻锋
+            if (newItem.quality >= 4) as.gotHighQuality = (as.gotHighQuality || 0) + 1; // 成就：今天手气不错（史诗+品质）
             // 拖拽进行中不重渲背包：否则会销毁正被拖动的源节点、触发 pointercancel 中止拖拽。
             if (!isDragging()) renderBag();
         }
@@ -205,6 +215,14 @@ function executeLoopBattle(mapId) {
         }
         // 成就：雷泽获胜计数（逆雷而行）
         if (mapMod.id === 'thunder_marsh') player.thunderWins = (player.thunderWins || 0) + 1;
+        // —— 第四阶段·胜利向成就统计 ——
+        if (curPath) { as.winByPath = as.winByPath || {}; as.winByPath[curPath] = (as.winByPath[curPath] || 0) + 1; } // 初心初现(剑修胜场)
+        as.winByMod = as.winByMod || {}; as.winByMod[mapMod.id] = (as.winByMod[mapMod.id] || 0) + 1;                  // 毒瘴不侵(词缀胜场)
+        if (finalPHpPct < 20) as.lowHpWins = (as.lowHpWins || 0) + 1;                                                 // 残血反杀
+        if (poisonDealt > 0 && curPath === 'poison') as.poisonKills = (as.poisonKills || 0) + 1;                      // 毒入骨髓
+        if (player.equips && player.equips.armor) as.armorWins = (as.armorWins || 0) + 1;                             // 披衣初成
+        if (!(player.equips && player.equips.weapon)) as.nakedWins = (as.nakedWins || 0) + 1;                         // 赤手空拳(隐藏)
+        if (mapMod.id === 'spirit_vein') as.spiritVeinExp = (as.spiritVeinExp || 0) + expG;                           // 灵脉钟秀
 
         checkAchievementsAndNotify('battle');
         const poisonNote = poisonDealt > 0 ? `（淬毒灼烧 ${formatNumber(poisonDealt)}）` : '';

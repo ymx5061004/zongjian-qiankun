@@ -50,6 +50,7 @@ export function normalizePlayer(parsed) {
     if (!p.achievements || typeof p.achievements !== 'object') p.achievements = {};
     if (!Array.isArray(p.achievements.unlocked)) p.achievements.unlocked = [];
     if (!Array.isArray(p.achievements.claimed)) p.achievements.claimed = [];
+    if (!p.achievements.stats || typeof p.achievements.stats !== 'object') p.achievements.stats = {}; // v6: 策略向成就累计计数（旧档为空，按需累计）
     if (!Number.isFinite(p.totalKills) || p.totalKills < 0) p.totalKills = 0;
     if (!Number.isFinite(p.totalCoinEarned) || p.totalCoinEarned < 0) p.totalCoinEarned = 0;
     if (!Number.isFinite(p.totalForgeCount) || p.totalForgeCount < 0) p.totalForgeCount = 0;

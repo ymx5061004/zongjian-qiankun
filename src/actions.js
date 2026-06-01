@@ -23,6 +23,13 @@ function gainCoin(player, amount, triggerType = 'coin') {
     checkAchievementsAndNotify(triggerType);
 }
 
+// 第四阶段·策略向成就计数累加（防御性确保 achievements.stats 存在）。供打造/强化等动作触发。
+function bumpAchStat(player, key, delta = 1) {
+    if (!player.achievements) player.achievements = { unlocked: [], claimed: [], stats: {} };
+    if (!player.achievements.stats) player.achievements.stats = {};
+    player.achievements.stats[key] = (player.achievements.stats[key] || 0) + delta;
+}
+
 // ============================================================
 // 新手指引任务链（江湖指引）：进度推进 + 领奖控制。
 // 纯逻辑在 domain（getQuestProgress/syncQuestProgress/claimGuideQuestReward），这里负责计数、提示、刷新、存档。
@@ -136,8 +143,8 @@ export function playerBreakthrough() {
     const unlockedSlot = GEAR_SLOTS.find(s => s.realmReq === player.realmLevel); // 本次突破是否恰好解锁新部位
     updatePlayerAttributes();
     renderMapList();
-    checkAchievementsAndNotify('realm');
-    maybeUpdateQuestProgress({ breakthroughCount: 1 }); // 指引「内息初成」
+    maybeUpdateQuestProgress({ breakthroughCount: 1 }); // 指引「内息初成」——先累计破境数
+    checkAchievementsAndNotify('all');                  // 再检测成就（含修为 realm 与「破境鸣金」challenge，需 breakthroughCount 已自增）
     saveGame();
     if (unlockedSlot) toast(`🎉 突破${getRealmName(player.realmLevel)}，解锁新装备部位【${unlockedSlot.label}】！`, 'success');
 }
@@ -505,11 +512,14 @@ export function craftGear(tier, slot) {
     if (path && path.mods && path.mods.craftQualityBonus && q < 5 && Math.random() < 0.25 * path.mods.craftQualityBonus) q++;
     const piece = makeGearPiece(tier, slot, q);
     player.bag.push(piece);
+    bumpAchStat(player, 'craftCount');                                  // 成就：千锤百炼
+    if (q >= 4) bumpAchStat(player, 'gotHighQuality');                  // 成就：今天手气不错（史诗+）
 
     hideTooltip();
     renderCraft();
     renderBag();
     updatePlayerAttributes();
+    checkAchievementsAndNotify('all');                                  // 打造类成就检测（千锤百炼/手气不错）
     saveGame();
     toast(`🛡️ 打造成功：【${piece.name}】（${QUALITY_NAMES[q]}成色）！`, 'success');
 }
@@ -531,10 +541,12 @@ export function enhanceEquip(slot) {
     if (player.materials[cost.ingotKey] <= 0) delete player.materials[cost.ingotKey];
     player.coin -= cost.coin;
     item.enhance = (item.enhance || 0) + 1;
+    bumpAchStat(player, 'enhanceCount');   // 成就：神兵微芒
 
     hideTooltip();
     renderEnhance();
     updatePlayerAttributes();   // 重算战力(强化已反映到 computeStats)+刷新顶栏碎银/装备名+N
+    checkAchievementsAndNotify('all');     // 强化类成就检测（神兵微芒）
     saveGame();
     toast(`⚒️ 强化成功！【${item.name}】精炼至 +${item.enhance}。`, 'success');
 }

@@ -17,9 +17,10 @@ export function getRealmName(lv) {
 }
 
 function ensureAchievementState(player) {
-    if (!player.achievements || typeof player.achievements !== 'object') player.achievements = { unlocked: [], claimed: [] };
+    if (!player.achievements || typeof player.achievements !== 'object') player.achievements = { unlocked: [], claimed: [], stats: {} };
     if (!Array.isArray(player.achievements.unlocked)) player.achievements.unlocked = [];
     if (!Array.isArray(player.achievements.claimed)) player.achievements.claimed = [];
+    if (!player.achievements.stats || typeof player.achievements.stats !== 'object') player.achievements.stats = {}; // 策略向成就累计计数
     if (!Number.isFinite(player.totalKills) || player.totalKills < 0) player.totalKills = 0;
     if (!Number.isFinite(player.totalCoinEarned) || player.totalCoinEarned < 0) player.totalCoinEarned = 0;
     if (!Number.isFinite(player.totalForgeCount) || player.totalForgeCount < 0) player.totalForgeCount = 0;
@@ -31,6 +32,9 @@ export function getAchievementById(id) {
 }
 
 function getCurrentMetricValue(player, metric) {
+    // 策略向成就的复杂条件：从 achievements.stats / quests.stats 累计读取（按动作触发累计，非每帧扫描）。
+    const as = (player.achievements && player.achievements.stats) || {};
+    const qs = (player.quests && player.quests.stats) || {};
     switch (metric) {
         case 'equippedLegendary':
             return Object.values(player.equips || {}).filter(eq => eq && eq.quality === LEGENDARY_QUALITY).length;
@@ -40,6 +44,22 @@ function getCurrentMetricValue(player, metric) {
             const hh = (player.skills || []).find(sk => sk && sk.isHongHuang);
             return hh ? (hh.level || 0) : 0;
         }
+        // —— 第四阶段·策略向计数 ——
+        case 'battleCount': return qs.battleCount || 0;
+        case 'breakthroughCount': return qs.breakthroughCount || 0;
+        case 'enhanceCount': return as.enhanceCount || 0;
+        case 'craftCount': return as.craftCount || 0;
+        case 'armorWins': return as.armorWins || 0;
+        case 'lowHpWins': return as.lowHpWins || 0;
+        case 'maxSingleHit': return as.maxSingleHit || 0;
+        case 'dodgeCount': return as.dodgeCount || 0;
+        case 'poisonKills': return as.poisonKills || 0;
+        case 'bodyDamageTaken': return as.bodyDamageTaken || 0;
+        case 'gotHighQuality': return as.gotHighQuality || 0;
+        case 'nakedWins': return as.nakedWins || 0;
+        case 'spiritVeinExp': return as.spiritVeinExp || 0;
+        case 'swordPathWins': return (as.winByPath && as.winByPath.sword) || 0;
+        case 'poisonMistWins': return (as.winByMod && as.winByMod.poison_mist) || 0;
         default:
             return player[metric] || 0;
     }
@@ -65,7 +85,7 @@ export function checkAchievements(player, triggerType = 'all') {
         if (triggerType === 'all') return true;
         if (triggerType === 'realm') return achievement.category === 'realm';
         if (triggerType === 'reborn') return achievement.category === 'reborn';
-        if (triggerType === 'battle') return achievement.category === 'battle' || achievement.category === 'map' || achievement.category === 'wealth';
+        if (triggerType === 'battle') return ['battle', 'map', 'wealth', 'challenge', 'path', 'funny'].includes(achievement.category); // 含第四阶段战斗驱动的策略向类别
         if (triggerType === 'map') return achievement.category === 'map';
         if (triggerType === 'equip') return achievement.id.startsWith('equip_');
         if (triggerType === 'skill') return achievement.category === 'skill';
@@ -99,6 +119,22 @@ export function claimAchievementReward(player, achievementId) {
     if (reward.honghuangPower) player.honghuangPower = (player.honghuangPower || 0) + reward.honghuangPower;
     player.achievements.claimed.push(achievementId);
     return { ok: true, reward };
+}
+
+// 永久成就奖励（reward.perm）：把所有「已领取」成就的永久百分比加成汇总。
+// computeStats 据此叠乘——claimed 列表是唯一来源、每次现算，故绝不重复叠加（验收 #4），未领取不计。
+// 返回 { all, atk, hp, def, crit, dodge, dropRate, coinRate }（百分比，缺省 0）。
+const PERM_KEYS = { all: 'allPct', atk: 'atkPct', hp: 'hpPct', def: 'defPct', crit: 'critPct', dodge: 'dodgePct', dropRate: 'dropRatePct', coinRate: 'coinRatePct' };
+export function achievementBonuses(player) {
+    const acc = { all: 0, atk: 0, hp: 0, def: 0, crit: 0, dodge: 0, dropRate: 0, coinRate: 0 };
+    if (!player.achievements || !Array.isArray(player.achievements.claimed)) return acc;
+    player.achievements.claimed.forEach(id => {
+        const a = getAchievementById(id);
+        const perm = a && a.reward && a.reward.perm;
+        if (!perm) return;
+        for (const k in PERM_KEYS) { const v = perm[PERM_KEYS[k]]; if (Number.isFinite(v)) acc[k] += v; }
+    });
+    return acc;
 }
 
 // ============================================================
@@ -319,6 +355,10 @@ export function computeStats(player) {
     const subM = 1 + M.subweaponMult / 100;   // 毒修：暗器(subweapon)贡献 ×(1+subweaponMult%)
     const enhBoost = 1 + M.enhanceMult / 100; // 器修：强化收益放大 ×(1+enhanceMult%)
 
+    // —— 永久成就奖励（已领取成就的 perm 加成，集中读取叠乘；未领取/无 perm 为 ×1，不写回基础属性 → 不重复叠加）——
+    const AB = achievementBonuses(player);
+    const abMul = k => 1 + ((AB.all || 0) + (AB[k] || 0)) / 100;
+
     // 丹药永久增益(pillBonus)与基础值同层：攻防血吃轮回乘区(根骨厚→修炼放大)，暴击/闪避同 base 不乘
     const pill = player.pillBonus || {};
     let calcHp = Math.floor((player.baseHp + (pill.hp || 0)) * rebornMult);
@@ -369,12 +409,13 @@ export function computeStats(player) {
     // 流派百分比乘区：五维均 ×(1+mult%)，与洪荒同层叠乘（无派/未配该项为 ×1，恒等于原行为）。
     // 五维一致支持 mult（虽现有 5 派只对 暴击/闪避 用 flat 点数加成，但 mult.crit/mult.dodge 也生效，避免将来配置静默失效）。
     // 暴击/闪避最终钳到 ≥0，防代价把数值压成负；闪避另有 dodgeCap 硬上限。
+    // 叠乘顺序：基础+被动+装备 → 洪荒 → 流派mult → 永久成就(abMul)。各层独立、缺省 ×1。
     const stats = {
-        hp: Math.floor(calcHp * hhMultiplier * (1 + (pm.hp || 0) / 100)),
-        atk: Math.floor(calcAtk * hhMultiplier * (1 + (pm.atk || 0) / 100)),
-        def: Math.floor(calcDef * hhMultiplier * (1 + (pm.def || 0) / 100)),
-        crit: parseFloat(Math.max(0, calcCrit * hhMultiplier * (1 + (pm.crit || 0) / 100)).toFixed(1)),
-        dodge: parseFloat(Math.max(0, Math.min(BALANCE.dodgeCap, calcDodge * hhMultiplier * (1 + (pm.dodge || 0) / 100))).toFixed(1)),
+        hp: Math.floor(calcHp * hhMultiplier * (1 + (pm.hp || 0) / 100) * abMul('hp')),
+        atk: Math.floor(calcAtk * hhMultiplier * (1 + (pm.atk || 0) / 100) * abMul('atk')),
+        def: Math.floor(calcDef * hhMultiplier * (1 + (pm.def || 0) / 100) * abMul('def')),
+        crit: parseFloat(Math.max(0, calcCrit * hhMultiplier * (1 + (pm.crit || 0) / 100) * abMul('crit')).toFixed(1)),
+        dodge: parseFloat(Math.max(0, Math.min(BALANCE.dodgeCap, calcDodge * hhMultiplier * (1 + (pm.dodge || 0) / 100) * abMul('dodge'))).toFixed(1)),
         dropRate: 100,
         coinRate: 100
     };
@@ -384,6 +425,9 @@ export function computeStats(player) {
             if (sk.coinRate) stats.coinRate += (sk.coinRate * sk.level);
         }
     });
+    // 永久成就：掉宝/财运为加法百分点（与上面被动同层）。
+    stats.dropRate += AB.dropRate || 0;
+    stats.coinRate += AB.coinRate || 0;
 
     // —— 词条战斗 mod 聚合（暗黑式 affix）——
     // 纯百分比，按「字段值 × 重数」线性叠加；不吃轮回/洪荒乘区（它们已是相对值，再乘会失控）。
@@ -662,6 +706,7 @@ export function simulateBattle(stats, enemy, skills, env = null) {
     const poisonEff = poison ? (enemy.isBoss ? (poison.bossEff != null ? poison.bossEff : 1) : 1) : 0;
     const poisonPerStack = poison ? Math.floor(stats.atk * (poison.pctOfAtk || 0) / 100 * poisonEff) : 0; // 每层每回合真伤(战斗内固定)
     let poisonStacks = 0, poisonDealt = 0;
+    let dodges = 0, maxHit = 0, dmgTaken = 0; // 第四阶段成就统计：闪避数 / 单次最高伤害 / 累计受伤
 
     // —— 地图词缀「战斗环境」（来自 resolveMapEnv；荒原/秘境为 null → 全程零影响）。各项已在 resolveMapEnv 封顶。——
     const envEnemyCrit = env ? (env.enemyCritChance || 0) : 0;          // 剑冢：敌方暴击率
@@ -703,6 +748,7 @@ export function simulateBattle(stats, enemy, skills, env = null) {
         if (isCrit) dmg = Math.floor(dmg * (B.critMult + critDmg / 100));   // 暴伤为暴击乘区的额外加成
 
         const dmgToE = Math.max(1, Math.floor(dmg - enemyEffDef));
+        if (dmgToE > maxHit) maxHit = dmgToE;                               // 成就：单次最高伤害
         eHp -= dmgToE;
         if (bleedDmg > 0) eHp -= bleedDmg;                                  // ③ 流血(无视防御)
 
@@ -732,6 +778,7 @@ export function simulateBattle(stats, enemy, skills, env = null) {
         } else if (blockPct > 0 && Math.random() * 100 < blockPct) {
             events.push({ side: 'evade', round, text: '格挡' });
         } else if (Math.random() * 100 < effDodge) {
+            dodges++;                                                      // 成就：闪避计数
             events.push({ side: 'evade', round, text: '闪避' });
         } else {
             let dmgToP = Math.max(1, enemy.atk - stats.def);
@@ -740,6 +787,7 @@ export function simulateBattle(stats, enemy, skills, env = null) {
             let eCrit = false;
             if (envEnemyCrit > 0 && Math.random() * 100 < envEnemyCrit) { dmgToP = Math.floor(dmgToP * envEnemyCritMult); eCrit = true; } // 剑冢：守卫暴击
             pHp -= dmgToP;
+            dmgTaken += dmgToP;                                            // 成就：累计受伤
             if (thornsDmg > 0) eHp -= thornsDmg;                           // 反伤(真伤)
             events.push({ side: 'enemy', round, dmg: dmgToP, reflect: thornsDmg, crit: eCrit, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
             if (eHp <= 0) break;                                            // 反伤也可能反杀
@@ -765,7 +813,8 @@ export function simulateBattle(stats, enemy, skills, env = null) {
 
     // enemyDead：敌人是否真被打死(用于 Boss——撑满回合"存活"不算击杀)。win 沿用旧义(玩家存活)，地图挂机不变。
     // poisonDealt：本场中毒(毒修)累计真伤，供战斗日志显式呈现「中毒」事件（无毒修则为 0）。
-    return { win: pHp > 0, enemyDead: eHp <= 0, events, poisonDealt };
+    // dodges/maxHit/dmgTaken/finalPHpPct：第四阶段策略向成就统计（闪避数/单次最高伤/累计受伤/终局血量%）。
+    return { win: pHp > 0, enemyDead: eHp <= 0, events, poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct: Math.max(0, (pHp / maxPHp) * 100) };
 }
 
 // 触发主动技时择招：取「有效倍率最高」的一门（power + level*scale）。
