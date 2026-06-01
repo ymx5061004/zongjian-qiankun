@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>纵剑乾坤 · 平衡模拟工具 (dev)</title>
+<!--
+  开发用平衡模拟工具（方案 A）。零依赖、与正式游戏完全解耦：
+  - 仅通过 type="module" 引入 dev/sim-core.js（其再引入 src/config.js、src/domain.js、src/state.js 等纯逻辑）。
+    （用 .js 而非 .mjs：静态服务器普遍把 .js 映射为 JS MIME，浏览器才肯按模块加载；.mjs 在 python http.server 下会被当 text/plain 拒绝。）
+  - 正式入口 index.html 不引用本页；本页也不引用 game.js / main.js / styles。
+  - 需经 HTTP 静态服务器访问（ES 模块不能 file:// 双击）：
+        python -m http.server 8080  →  http://localhost:8080/dev/balance-sim.html
+-->
+<style>
+  body { background:#111; color:#ddd; font-family: system-ui, "Microsoft YaHei", sans-serif; margin:0; padding:18px; }
+  h1 { color:#c2a95f; font-size:20px; margin:0 0 4px; }
+  .sub { color:#888; font-size:12px; margin-bottom:14px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+  button { background:#1d2a36; color:#cfe6ff; border:1px solid #2c3a4a; border-radius:6px; padding:7px 12px; cursor:pointer; font-size:13px; }
+  button:hover { background:#26384a; }
+  input { width:64px; background:#0d0d0d; color:#fff; border:1px solid #333; border-radius:4px; padding:5px; }
+  #out { margin-top:10px; }
+  .sec { color:#c2a95f; font-weight:bold; margin:18px 0 6px; border-bottom:1px solid #2a2a2a; padding-bottom:4px; }
+  table { border-collapse:collapse; width:100%; font-size:12px; margin-bottom:8px; }
+  th, td { border:1px solid #262626; padding:4px 8px; text-align:right; white-space:nowrap; }
+  th { background:#181818; color:#9fb6c9; position:sticky; top:0; }
+  td:first-child, th:first-child { text-align:left; }
+  tr:nth-child(even) td { background:#151515; }
+  .note { color:#8a7a4a; font-size:12px; margin:4px 0 10px; }
+  .kv { font-size:13px; line-height:1.9; }
+  .kv b { color:#c2a95f; }
+</style>
+</head>
+<body>
+  <h1>⚖️ 纵剑乾坤 · 平衡模拟工具 <span style="font-size:12px;color:#666;">(dev only)</span></h1>
+  <div class="sub">复用 src/domain.js 纯逻辑（finalizeEnemyStats / computeStats / simulateBattle / resolveMapEnv…）。奖励/离线为按 BALANCE 再推导，已注明。</div>
+  <div class="bar">
+    <button data-act="newbie">新手30min投影</button>
+    <button data-act="enemy">①敌人曲线</button>
+    <button data-act="power">②战力曲线</button>
+    <button data-act="reward">⑤奖励曲线</button>
+    <button data-act="offline">⑥离线收益</button>
+    <span style="margin-left:12px;">第 <input id="stage" type="number" value="20" min="1" max="100"> 关</span>
+    <button data-act="path">③④该关·流派胜率</button>
+    <button data-act="all">全部</button>
+  </div>
+  <div id="out"></div>
+
+<script type="module">
+import {
+  enemyCurve, powerCurve, pathComparison, rewardCurve, offlineEstimate,
+  incomeComparison, newbie30min
+} from './sim-core.js';
+
+const out = document.getElementById('out');
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
+function tableHtml(rows) {
+  if (!rows || !rows.length) return '<div class="note">（无数据）</div>';
+  const cols = Object.keys(rows[0]);
+  const head = '<tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+  const body = rows.map(r => '<tr>' + cols.map(c => `<td>${esc(r[c])}</td>`).join('') + '</tr>').join('');
+  return `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+function kvHtml(obj) {
+  return '<div class="kv">' + Object.entries(obj).map(([k, v]) => `<div><b>${esc(k)}</b>：${esc(v)}</div>`).join('') + '</div>';
+}
+function sec(t) { return `<div class="sec">${t}</div>`; }
+
+const render = {
+  newbie() { return sec('新手前 30 分钟 · 粗略投影') + kvHtml(newbie30min()); },
+  enemy() { return sec('① 关卡 → 敌人属性曲线') + tableHtml(enemyCurve()); },
+  power() { return sec('② 推荐配置下玩家战力曲线') + '<div class="note">推荐配置=该关解锁境界 + 该档 0 成色装备（线性破境，不含轮回/洪荒乘区——故对深层关卡远不够，正反映成长缺口）。</div>' + tableHtml(powerCurve()); },
+  reward() { return sec('⑤ 每场胜利奖励（按 BALANCE.reward + 词缀再推导）') + tableHtml(rewardCurve()); },
+  offline() {
+    let h = sec('⑥ 离线收益（采铜矿示例 · 封顶 12h）') + tableHtml(offlineEstimate('mine_copper'));
+    h += sec('⑥ 离线 vs 在线 · 同轴(矿/时)对比') + [5, 20, 50].map(s => kvHtml(incomeComparison(s))).join('<hr style="border:0;border-top:1px solid #222;">');
+    return h;
+  },
+  path() {
+    const s = Math.max(1, Math.min(100, Number(document.getElementById('stage').value) || 20));
+    const { reborn, rows } = pathComparison(s);
+    return sec(`③④ 第 ${s} 关 · 5 流派胜率对比`) +
+      `<div class="note">自动调参：把「无流派」基线胜率拉到 ~50% 作公平战力锚（本关需轮回乘区 ×${reborn}），再只改流派对比。各 300 场·含地图词缀环境。</div>` +
+      tableHtml(rows);
+  },
+};
+
+function run(act) {
+  out.innerHTML = '<div class="note">模拟中…（大量战斗采样，深层关卡稍慢）</div>';
+  // 让“模拟中”先绘制，再跑重计算
+  setTimeout(() => {
+    try {
+      if (act === 'all') out.innerHTML = render.newbie() + render.enemy() + render.power() + render.reward() + render.path() + render.offline();
+      else out.innerHTML = render[act]();
+    } catch (e) { out.innerHTML = `<div class="note" style="color:#e74c3c;">出错：${esc(e && e.message || e)}</div>`; console.error(e); }
+  }, 20);
+}
+document.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => run(b.dataset.act)));
+run('newbie'); // 默认先出一个
+</script>
+</body>
+</html>
