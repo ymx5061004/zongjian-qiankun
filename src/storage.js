@@ -6,9 +6,10 @@
 // ============================================================
 import { state, makeDefaultPlayer } from './state.js';
 import { SKILL_SUFFIXES, GEAR_SLOTS, PROFESSIONS } from './config.js';
+import { syncQuestProgress } from './domain.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;                 // v4: 新增 quests(新手指引任务链)；补全逻辑在 normalizePlayer，旧档不炸
 
 export function saveGame() {
     if (!state.player.name) return;
@@ -26,6 +27,7 @@ export function saveGame() {
 // loadGame（读 localStorage）与 importSaveString（读外部文件）共用，保证导入的旧档同样不炸。
 export function normalizePlayer(parsed) {
     const data = migrate(parsed);
+    const hadQuests = !!(data && data.quests && typeof data.quests === 'object'); // 旧档(无 quests)需按既有进度回种计数器
     data.currentMapId = null; // 不自动恢复挂机
     // 以默认值为底，旧档缺的新字段自动补全 —— 加字段不再炸档
     const player = Object.assign(makeDefaultPlayer(), data);
@@ -52,6 +54,24 @@ export function normalizePlayer(parsed) {
     if (!Number.isFinite(p.totalCoinEarned) || p.totalCoinEarned < 0) p.totalCoinEarned = 0;
     if (!Number.isFinite(p.totalForgeCount) || p.totalForgeCount < 0) p.totalForgeCount = 0;
     if (!Number.isFinite(p.maxMapCleared) || p.maxMapCleared < 0) p.maxMapCleared = 0;
+    // —— 新手指引任务链字段补全（v4 新增）：旧档无 quests 时整体由默认对象兜底，这里逐项防御 ——
+    if (!p.quests || typeof p.quests !== 'object') p.quests = {};
+    if (!Array.isArray(p.quests.completed)) p.quests.completed = [];
+    if (!Array.isArray(p.quests.claimed)) p.quests.claimed = [];
+    if (p.quests.activeId === undefined) p.quests.activeId = null;
+    if (!p.quests.stats || typeof p.quests.stats !== 'object') p.quests.stats = {};
+    const qs = p.quests.stats;
+    if (!Number.isFinite(qs.battleCount) || qs.battleCount < 0) qs.battleCount = 0;
+    if (!Number.isFinite(qs.breakthroughCount) || qs.breakthroughCount < 0) qs.breakthroughCount = 0;
+    if (!Number.isFinite(qs.shopVisitCount) || qs.shopVisitCount < 0) qs.shopVisitCount = 0;
+    // 旧档首次引入 quests：用既有进度回种「无法从其他状态派生」的计数器，
+    // 让早已满足条件的任务直接显示「可领取」而非从零开始（不让旧玩家卡死）。
+    if (!hadQuests) {
+        if (p.totalKills > 0) qs.battleCount = p.totalKills;
+        if (p.realmLevel > 1) qs.breakthroughCount = p.realmLevel - 1;
+    }
+    // 静默基线同步：填好 completed[] 与 activeId（不弹提示），避免旧档首个动作触发「一次性补发」的提示风暴。
+    syncQuestProgress(player);
     return player;
 }
 

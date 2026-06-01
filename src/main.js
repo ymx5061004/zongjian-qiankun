@@ -23,7 +23,8 @@ import {
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
     enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
-    exportSaveFile, importSaveFile, buyBagSlot, takePill
+    exportSaveFile, importSaveFile, buyBagSlot, takePill,
+    claimGuideQuestReward, recordShopVisit
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -100,7 +101,7 @@ function onDelegatedClick(e) {
     switch (el.dataset.act) {
         case 'finalize-character': finalizeCharacter(); break;
         case 'enter-game': enterGame(); break;
-        case 'switch-page': switchPage(el.dataset.page, el); break;
+        case 'switch-page': switchPage(el.dataset.page, el); if (el.dataset.page === 'shop') recordShopVisit(); break;
         case 'toggle-menu': toggleMenu(); break;
         case 'close-menu': closeMenu(); break;
         case 'toggle-group': el.closest('.menu-group')?.classList.toggle('collapsed'); break;
@@ -130,6 +131,7 @@ function onDelegatedClick(e) {
         case 'buy-item': buyShopItem(Number(el.dataset.idx)); break;
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
         case 'claim-achievement': if (claimAchievementReward(el.dataset.id)) { updatePlayerAttributes(); checkAchievementsAndNotify('coin'); saveGame(); } break;
+        case 'claim-quest': claimGuideQuestReward(el.dataset.id); break;
         case 'use-bag': hideTooltip(); useBagItem(Number(el.dataset.idx)); break;
         case 'guide-jump': { const t = document.getElementById(el.dataset.target); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); break; }
         case 'export-save': exportSaveFile(); break;

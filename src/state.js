@@ -21,6 +21,10 @@ export function makeDefaultPlayer() {
         activity: null,                // 当前挂机生产动作 id（与战斗挂机互斥）；存档保留以便读档续挂+离线结算
         lastTickTime: 0,               // 上次存活时间戳（saveGame 时刷新）；读档据此结算离线产出
         achievements: { unlocked: [], claimed: [] },
+        // —— 新手指引任务链（江湖指引）——
+        // completed: 已达成任务 id；claimed: 已领奖 id；activeId: 当前推荐任务（由 domain.syncQuestProgress 计算）；
+        // stats: 无法从其他状态派生、需累计的计数器（其余进度尽量从既有状态派生，见 domain.getQuestProgress）。
+        quests: { completed: [], claimed: [], activeId: null, stats: { battleCount: 0, breakthroughCount: 0, shopVisitCount: 0 } },
         totalKills: 0,
         totalCoinEarned: 0,
         totalForgeCount: 0,

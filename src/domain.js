@@ -4,7 +4,7 @@
 // ============================================================
 import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
-    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS
+    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS
 } from './config.js';
 const LEGENDARY_QUALITY = 5;
 
@@ -98,6 +98,135 @@ export function claimAchievementReward(player, achievementId) {
     if (reward.exp) player.exp += reward.exp;
     if (reward.honghuangPower) player.honghuangPower = (player.honghuangPower || 0) + reward.honghuangPower;
     player.achievements.claimed.push(achievementId);
+    return { ok: true, reward };
+}
+
+// ============================================================
+// 新手指引任务链（江湖指引）——纯逻辑：进度判定 / 完成判定 / 同步 / 领奖。
+// 不碰 DOM、不存档、不弹提示（与 achievement 同套路；仅就地改传入的 player.quests，
+// 与 checkAchievements 改 player.achievements 一致）。落地+UI 在 actions.js / render.js。
+// ============================================================
+function ensureQuestState(player) {
+    if (!player.quests || typeof player.quests !== 'object') player.quests = {};
+    const q = player.quests;
+    if (!Array.isArray(q.completed)) q.completed = [];
+    if (!Array.isArray(q.claimed)) q.claimed = [];
+    if (q.activeId === undefined) q.activeId = null;
+    if (!q.stats || typeof q.stats !== 'object') q.stats = {};
+    ['battleCount', 'breakthroughCount', 'shopVisitCount'].forEach(k => { if (!Number.isFinite(q.stats[k]) || q.stats[k] < 0) q.stats[k] = 0; });
+}
+
+export function getGuideQuestById(id) {
+    return GUIDE_QUESTS.find(q => q.id === id) || null;
+}
+
+// 任务排序后的清单（按 order；防御性排序，配置乱序也不影响推进）。
+function questsInOrder() {
+    return GUIDE_QUESTS.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
+// —— 派生小工具：尽量从既有状态判定，旧档早已满足条件即直接「可领取」 ——
+function ownsAnyOre(player) {
+    const m = player.materials || {};
+    return Object.keys(m).some(k => k.startsWith('ore_') && m[k] > 0);
+}
+function ownsAnyPill(player) {
+    const m = player.materials || {};
+    return Object.keys(m).some(k => MATERIALS[k] && MATERIALS[k].pill && m[k] > 0);
+}
+function pillBonusSum(player) {
+    const pb = player.pillBonus || {};
+    return ['hp', 'atk', 'def', 'crit', 'dodge'].reduce((s, k) => s + (Number.isFinite(pb[k]) ? pb[k] : 0), 0);
+}
+
+// 单条任务进度：返回 { current, target, done, pct }。target 取自任务配置（≥1）。
+export function getQuestProgress(player, quest) {
+    ensureQuestState(player);
+    const s = player.quests.stats;
+    const target = quest.target || 1;
+    let cur = 0;
+    switch (quest.type) {
+        case 'battleCount':  cur = s.battleCount || 0; break;                                              // 计数器（每场战斗 +1）
+        case 'equipItem':    cur = Object.values(player.equips || {}).some(Boolean) ? 1 : 0; break;        // 任意部位已装备
+        case 'clearMap':     cur = player.maxMapCleared || 0; break;                                       // 历史最高通关关卡
+        case 'forgeCount':   cur = player.totalForgeCount || 0; break;                                     // 洪炉融合累计次数（既有字段）
+        case 'breakthrough': cur = s.breakthroughCount || 0; break;                                        // 计数器（破境 +1；旧档由境界回种）
+        case 'ownSkill':     cur = Array.isArray(player.skills) ? player.skills.length : 0; break;         // 已掌握秘籍数（初始 1 本）
+        case 'visitShop':    cur = s.shopVisitCount || 0; break;                                           // 计数器（进入/刷新黑市 +1）
+        case 'startMining':  cur = (((player.professions && player.professions.mining && player.professions.mining.exp) || 0) > 0 || ownsAnyOre(player)) ? 1 : 0; break;
+        case 'getPill':      cur = (((player.professions && player.professions.alchemy && player.professions.alchemy.exp) || 0) > 0 || ownsAnyPill(player) || pillBonusSum(player) > 0) ? 1 : 0; break;
+        case 'questsDone':   cur = countCompletedGuideQuests(player, quest.id); break;                     // 已达成的其它任务数
+        case 'learnReborn':  cur = ((player.rebornCount || 0) >= 1 || (player.realmLevel || 1) >= BALANCE.reborn.minLevel) ? 1 : 0; break;
+        default:             cur = 0;
+    }
+    cur = Math.max(0, cur);
+    const done = cur >= target;
+    return { current: cur, target, done, pct: Math.max(0, Math.min(100, Math.floor((cur / target) * 100))) };
+}
+
+export function isQuestCompleted(player, quest) {
+    return getQuestProgress(player, quest).done;
+}
+
+// 已达成的任务数（可排除某条，供 'questsDone' 自身计数时避免自指）。
+function countCompletedGuideQuests(player, excludeId) {
+    return GUIDE_QUESTS.reduce((n, q) => {
+        if (q.id === excludeId || q.type === 'questsDone') return n; // 排除自身 + 其它汇总型任务，避免互相递归
+        return n + (getQuestProgress(player, q).done ? 1 : 0);
+    }, 0);
+}
+
+// 同步任务状态：刷新 completed[] 与 activeId（推荐任务=按 order 第一条未领取的）。
+// 返回「本次新达成」的任务 id 数组（供 actions 弹「可领取」提示，与 checkAchievements 同模式）。幂等，可频繁调用。
+export function syncQuestProgress(player) {
+    ensureQuestState(player);
+    const completed = new Set(player.quests.completed);
+    const newly = [];
+    questsInOrder().forEach(q => {
+        if (!completed.has(q.id) && getQuestProgress(player, q).done) { completed.add(q.id); newly.push(q.id); }
+    });
+    if (newly.length) player.quests.completed = [...completed];
+    const next = questsInOrder().find(q => !player.quests.claimed.includes(q.id));
+    player.quests.activeId = next ? next.id : null;
+    return newly;
+}
+
+// 当前推荐任务对象（按 order 第一条未领取的）；全部领取完返回 null。
+export function getCurrentGuideQuest(player) {
+    ensureQuestState(player);
+    const next = questsInOrder().find(q => !player.quests.claimed.includes(q.id));
+    return next || null;
+}
+
+// 尚未领取的任务清单（按 order）——「待办」列表。
+export function getAvailableGuideQuests(player) {
+    ensureQuestState(player);
+    return questsInOrder().filter(q => !player.quests.claimed.includes(q.id));
+}
+
+// 领取奖励（纯状态层）：校验「存在 / 已达成 / 未领过」→ 发放「不占背包」的奖励（碎银/修为/物料/永久根骨/洪荒）→ 标记已领取。
+// item/skill 等「占背包」的奖励不在此发放，由 actions 在领取前校验背包空位后落地（背包满则拒绝领取）。返回 { ok, reward, reason }。
+export function claimGuideQuestReward(player, questId) {
+    ensureQuestState(player);
+    const quest = getGuideQuestById(questId);
+    if (!quest) return { ok: false, reason: 'not_found' };
+    if (player.quests.claimed.includes(questId)) return { ok: false, reason: 'claimed' };
+    if (!getQuestProgress(player, quest).done) return { ok: false, reason: 'incomplete' };
+
+    const reward = quest.reward || {};
+    if (reward.coins) player.coin += reward.coins;
+    if (reward.exp) player.exp += reward.exp;
+    if (reward.honghuangPower) player.honghuangPower = (player.honghuangPower || 0) + reward.honghuangPower;
+    if (reward.material) {
+        if (!player.materials || typeof player.materials !== 'object') player.materials = {};
+        for (const [k, v] of Object.entries(reward.material)) player.materials[k] = (player.materials[k] || 0) + v;
+    }
+    if (reward.statBonus) {
+        if (!player.pillBonus || typeof player.pillBonus !== 'object') player.pillBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
+        for (const [k, v] of Object.entries(reward.statBonus)) player.pillBonus[k] = (player.pillBonus[k] || 0) + v;
+    }
+    player.quests.claimed.push(questId);
+    syncQuestProgress(player); // 领取后推进 activeId 到下一条
     return { ok: true, reward };
 }
 

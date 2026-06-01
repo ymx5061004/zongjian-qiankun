@@ -4,11 +4,12 @@
 // ============================================================
 import { state } from './state.js';
 import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES, GEAR_SLOTS } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost } from './domain.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
-    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse, renderBagExpand, renderPills
+    rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse, renderBagExpand, renderPills,
+    renderQuestPanel, fmtQuestReward
 } from './ui/render.js';
 import { saveGame, exportSaveString, importSaveString } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -20,6 +21,72 @@ function gainCoin(player, amount, triggerType = 'coin') {
     player.coin += amount;
     player.totalCoinEarned = (player.totalCoinEarned || 0) + amount;
     checkAchievementsAndNotify(triggerType);
+}
+
+// ============================================================
+// 新手指引任务链（江湖指引）：进度推进 + 领奖控制。
+// 纯逻辑在 domain（getQuestProgress/syncQuestProgress/claimGuideQuestReward），这里负责计数、提示、刷新、存档。
+// ============================================================
+// 累计任务计数器并同步进度：statDelta 形如 { battleCount:1 }（可空，纯派生型任务传空即可）。
+// 对「本次新达成」的任务弹一条可领取提示；若「江湖指引」页正打开则即时重渲。不在此存档（由调用方动作统一存）。
+export function maybeUpdateQuestProgress(statDelta) {
+    const player = state.player;
+    if (statDelta) {
+        if (!player.quests || typeof player.quests !== 'object') player.quests = { completed: [], claimed: [], activeId: null, stats: {} };
+        if (!player.quests.stats || typeof player.quests.stats !== 'object') player.quests.stats = {};
+        for (const [k, v] of Object.entries(statDelta)) player.quests.stats[k] = (player.quests.stats[k] || 0) + v;
+    }
+    const newly = syncQuestProgress(player); // 内部已对 player.quests 做防御性初始化
+    newly.forEach(id => {
+        const q = getGuideQuestById(id);
+        if (q) toast(`📜 指引达成：「${q.title}」，可前往「江湖指引」领取奖励！`, 'success');
+    });
+    if (document.getElementById('page-quest')?.classList.contains('active')) renderQuestPanel();
+}
+
+// 进入黑市时记录一次（满足「黑市问价」指引）。单独成函数供 main.js 切页委托调用，避免 render→actions 循环依赖。
+// 幂等：指引只需「进入/刷新过一次」(target=1)，已记录则直接返回——否则每次点黑市菜单都会累加计数并重复写存档。
+// 刷新黑市(refreshShop)必发生在「已进入黑市」之后(刷新按钮就在黑市页)，故进入即记录、刷新不再单独计数。
+export function recordShopVisit() {
+    const player = state.player;
+    if (player.quests && player.quests.stats && (player.quests.stats.shopVisitCount || 0) >= 1) return;
+    maybeUpdateQuestProgress({ shopVisitCount: 1 });
+    saveGame();
+}
+
+// 领取指引奖励：同一任务只可领一次；占背包的奖励(item/skill)先校验空位，满则拒绝并提示（沿用现有背包满规则）。
+export function claimGuideQuestReward(questId) {
+    const player = state.player;
+    const quest = getGuideQuestById(questId);
+    if (!quest) return;
+    const reward = quest.reward || {};
+    const needsBag = !!(reward.item || reward.skill);
+    if (needsBag && player.bag.length >= player.bagMax) {
+        toast('行囊已满，请先清理行囊或去黑市扩容后再领取此奖励。', 'error');
+        return;
+    }
+    const r = claimGuideQuestRewardDomain(player, questId); // 校验(存在/已达成/未领过) + 发放不占背包的奖励 + 标记已领取
+    if (!r.ok) {
+        if (r.reason === 'claimed') toast('该指引奖励已领取。', 'error');
+        else if (r.reason === 'incomplete') toast('该指引尚未达成，无法领取。', 'error');
+        else toast('领取失败。', 'error');
+        return;
+    }
+    // 占背包的奖励：空位已在上方确保，这里安全落地（默认配置未用 item/skill 奖励，作为完整性与未来扩展保留）。
+    if (reward.item) {
+        const slots = unlockedGearSlots(player.realmLevel);
+        const wantSlot = (reward.item.slot && slots.find(s => s.key === reward.item.slot)) ? reward.item.slot : slots[0].key;
+        player.bag.push(makeGearPiece(reward.item.tier || 1, wantSlot, reward.item.quality || 0));
+    }
+    if (reward.skill) {
+        const sk = generateSkillByMatrix(player.realmLevel);
+        player.bag.push({ id: 'bk_' + Date.now(), name: `秘籍·《${sk.name}》`, type: 'book', payload: sk, price: Math.floor(sk.price / 5) });
+    }
+    renderQuestPanel();
+    renderBag();               // 顶栏/背包随奖励刷新（含极少数 item/skill 奖励入袋）
+    updatePlayerAttributes();  // 碎银/修为/永久根骨(statBonus)反映到面板与顶栏
+    saveGame();
+    toast(`🎁 领取成功：${fmtQuestReward(reward)}`, 'success');
 }
 
 // —— 破境冲关 ——
@@ -36,6 +103,7 @@ export function playerBreakthrough() {
     updatePlayerAttributes();
     renderMapList();
     checkAchievementsAndNotify('realm');
+    maybeUpdateQuestProgress({ breakthroughCount: 1 }); // 指引「内息初成」
     saveGame();
     if (unlockedSlot) toast(`🎉 突破${getRealmName(player.realmLevel)}，解锁新装备部位【${unlockedSlot.label}】！`, 'success');
 }
@@ -106,6 +174,7 @@ export function refreshShop() {
     rollShopGoods();
     hideTooltip();
     updatePlayerAttributes();
+    recordShopVisit(); // 指引「黑市问价」（幂等：进入黑市时通常已记录，此处刷新仅作兜底，不会重复计数）
     saveGame();
     toast(`已消耗 ${cost} 文，黑市新进了一批货。`, 'success');
 }
@@ -183,6 +252,7 @@ export function executeForge() {
     renderBag();
     updatePlayerAttributes();
     checkAchievementsAndNotify('forge');
+    maybeUpdateQuestProgress(); // 指引「天地洪炉」（派生自 totalForgeCount）
     saveGame();
     toast(`⚡ 洪炉轰鸣！消耗 ${cost} 文碎银，成功炼制出：【${resultItem.name}】！`, 'success');
 }
@@ -296,12 +366,14 @@ export async function useBagItem(idx) {
             player.equips[item.type] = item;
             if (old) player.bag[curIdx] = old; else player.bag.splice(curIdx, 1);
             checkAchievementsAndNotify('equip');
+            maybeUpdateQuestProgress(); // 指引「夺得兵刃」（派生型，无需计数）
         } else {
             if (player.skills.find(s => s.name === item.payload.name)) { toast("你早已对此门武学烂熟于心。", 'error'); return; }
             player.skills.push(item.payload);
             player.bag.splice(curIdx, 1);
             toast(`✨ 成功参悟绝学：《${item.payload.name}》！`, 'success');
             checkAchievementsAndNotify('skill');
+            maybeUpdateQuestProgress(); // 指引「百修入门」（派生型，无需计数）
             renderPlayerSkills();
         }
         renderBag();
@@ -496,6 +568,7 @@ export function learnAllSkills() {
     });
     player.bag = remain;
     if (learned > 0) checkAchievementsAndNotify('skill');
+    maybeUpdateQuestProgress(); // 指引「百修入门」（派生自已掌握秘籍数）
     renderPlayerSkills();
     renderBag();
     updatePlayerAttributes();

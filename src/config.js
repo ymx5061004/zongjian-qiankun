@@ -404,3 +404,31 @@ export const BOSSES = [
     { id: "b4", name: "幽冥鬼帝",     realmReq: 100, mapEquiv: 45, toughness: 2.0, crystalMin: 3, crystalMax: 6, coin: 120000 },
     { id: "b5", name: "混沌虚空兽",   realmReq: 140, mapEquiv: 55, toughness: 2.5, crystalMin: 5, crystalMax: 9, coin: 300000 }
 ];
+
+// ============================================================
+// 新手指引任务链（江湖指引）：把「前 30 分钟该做什么」做成可领奖的目标系统。
+// 逐步引导玩家接触 战斗→装备→洪炉→突破→秘籍→黑市→采矿→炼丹→秘境→轮回 等核心系统。
+// 每条 = 一个目标 + 奖励。进度判定/领取逻辑见 domain.js（纯函数），落地+UI 见 actions.js / render.js。
+//   type:    进度判定类型（domain.getQuestProgress 按此取值；新增类型在那里加一个 case 即可）；
+//   target:  目标值；
+//   reward:  { coins, exp, material:{物料key:数量}, statBonus:{hp/atk/def/crit/dodge}, honghuangPower, item, skill }；
+//   page:    「前往」按钮跳转的页签 id（= switch-page 的 data-page）；
+//   unlockHint: 去哪完成的文字提示；order: 排序（同时是推荐推进顺序）；next: 下一条 id（仅作链路标注）。
+// 奖励优先用 碎银/修为/物料/永久根骨(statBonus)——不占背包、对旧档零风险；
+// item/skill 类奖励会占背包，actions 领取前会校验背包是否已满（满则拒绝并提示，沿用现有背包满规则）。
+// 进度判定尽量「从现有状态派生」（如已装备/已通关/已会秘籍数），这样旧档若早已满足条件会直接显示「可领取」，不会卡死。
+// ============================================================
+export const GUIDE_QUESTS = [
+    { id: 'q_battle',       order: 1,  type: 'battleCount',  target: 1,  title: '初入江湖', desc: '在「百关征途」挑战任意关卡，完成 1 次战斗。',               reward: { coins: 2000, exp: 200 },                          page: 'adventure', unlockHint: '左侧菜单 → 百关征途 → 点任意关卡【挑战】',            next: 'q_equip' },
+    { id: 'q_equip',        order: 2,  type: 'equipItem',    target: 1,  title: '夺得兵刃', desc: '在「行囊与洪炉」点击一件装备并【披挂上身】。',             reward: { coins: 3000, material: { ingot_copper: 4 } },     page: 'bag',       unlockHint: '行囊与洪炉 → 点背包里的装备 → 披挂上身',           next: 'q_map3' },
+    { id: 'q_map3',         order: 3,  type: 'clearMap',     target: 3,  title: '小试锋芒', desc: '一路挂机征战，通关到第 3 关。',                           reward: { coins: 3000, exp: 800 },                          page: 'adventure', unlockHint: '百关征途 → 挂机推进到第 3 关',                     next: 'q_forge' },
+    { id: 'q_forge',        order: 4,  type: 'forgeCount',   target: 1,  title: '天地洪炉', desc: '把两件物品投入「天地洪炉」融合 1 次。',                   reward: { coins: 5000 },                                    page: 'bag',       unlockHint: '行囊与洪炉 → 拖两件物品入炉 → 点【融合】',         next: 'q_breakthrough' },
+    { id: 'q_breakthrough', order: 5,  type: 'breakthrough', target: 1,  title: '内息初成', desc: '在「修真命格」完成 1 次破境冲关（境界 +1）。',             reward: { exp: 1500 },                                      page: 'role',      unlockHint: '修真命格 → 破境冲关（需消耗修为）',               next: 'q_skill' },
+    { id: 'q_skill',        order: 6,  type: 'ownSkill',     target: 2,  title: '百修入门', desc: '除初始拳法外，再参悟或购买并学会 1 本秘籍。',             reward: { coins: 6000, exp: 1000 },                         page: 'kungfu',    unlockHint: '珍宝黑市买秘籍 → 行囊参悟，或「百修秘籍」一键参悟', next: 'q_shop' },
+    { id: 'q_shop',         order: 7,  type: 'visitShop',    target: 1,  title: '黑市问价', desc: '进入或刷新一次「珍宝黑市」，看看有什么好货。',           reward: { coins: 5000 },                                    page: 'shop',      unlockHint: '左侧菜单 → 珍宝黑市',                             next: 'q_mine' },
+    { id: 'q_mine',         order: 8,  type: 'startMining',  target: 1,  title: '采矿试炼', desc: '到「采矿」开采矿石，或在战斗中拾得任意矿石。',           reward: { material: { ore_copper: 10 } },                   page: 'mining',    unlockHint: '生产经营 → 采矿 → 开采铜矿【开始】',              next: 'q_pill' },
+    { id: 'q_pill',         order: 9,  type: 'getPill',      target: 1,  title: '炼药初识', desc: '采药并在「炼丹」炼出一炉丹药（或服用任意丹药）。',         reward: { statBonus: { hp: 50 } },                          page: 'alchemy',   unlockHint: '生产经营 → 采药 → 炼丹 → 丹房服用',              next: 'q_map10' },
+    { id: 'q_map10',        order: 10, type: 'clearMap',     target: 10, title: '斩妖问道', desc: '战力渐长，通关到第 10 关（亦可去秘境击败 Boss）。',       reward: { coins: 20000, exp: 3000 },                        page: 'adventure', unlockHint: '百关征途 → 推进到第 10 关；秘境可挑战 Boss',       next: 'q_five' },
+    { id: 'q_five',         order: 11, type: 'questsDone',   target: 5,  title: '一日小成', desc: '累计达成 5 个新手指引任务。',                             reward: { coins: 30000, statBonus: { atk: 8, def: 6 } },    page: 'quest',     unlockHint: '继续完成上面的指引任务即可',                       next: 'q_reborn' },
+    { id: 'q_reborn',       order: 12, type: 'learnReborn',  target: 1,  title: '百世伏笔', desc: '了解「渡劫轮回」：境界达 20 级即可渡劫，重置境界换取全属性永久质变（不必现在就轮回）。', reward: { coins: 50000, exp: 10000 }, page: 'role', unlockHint: '修真命格 → 渡劫轮回（境界 ≥ 20 解锁）', next: null }
+];

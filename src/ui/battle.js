@@ -9,6 +9,7 @@ import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality
 import { renderBag, renderMapList, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
 import { checkAchievementsAndNotify } from './achievement.js';
+import { maybeUpdateQuestProgress } from '../actions.js';
 
 // 敌人火柴人 SVG（与原版一致）
 const ENEMY_SVG = `
@@ -180,4 +181,5 @@ function executeLoopBattle(mapId) {
     }, B.hpResetDelayMs);
 
     updatePlayerAttributes();
+    maybeUpdateQuestProgress({ battleCount: 1 }); // 指引「初入江湖」（每场战斗 +1，胜负皆计）
 }

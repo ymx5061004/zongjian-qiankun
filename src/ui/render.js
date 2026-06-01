@@ -3,9 +3,9 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest } from '../domain.js';
 import { formatNumber } from '../util.js';
 import { renderAchievementPanel } from './achievement.js';
 
@@ -744,11 +744,17 @@ export function closeMenu() {
 // ---------- 切换页签（tabEl 由委托传入，取代原全局 event.currentTarget）----------
 export function switchPage(pageId, tabEl) {
     hideTooltip();
+    const pageEl = document.getElementById(`page-${pageId}`);
+    if (!pageEl) return;   // 防御：未知页签不抛错（如「前往」传入异常 page）
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.menu-item').forEach(b => b.classList.remove('active'));
-    document.getElementById(`page-${pageId}`).classList.add('active');
-    if (tabEl) tabEl.classList.add('active');
+    pageEl.classList.add('active');
+    // 高亮对应导航项：无论点导航、还是程序化「前往」跳转都正确高亮（tabEl 仅作兜底）。
+    const navItem = document.querySelector(`.menu-item[data-page="${pageId}"]`);
+    if (navItem) navItem.classList.add('active');
+    else if (tabEl && tabEl.classList.contains('menu-item')) tabEl.classList.add('active');
     closeMenu();   // 移动端：点菜单项后收起抽屉
+    if (pageId === 'quest') renderQuestPanel();
     if (pageId === 'role' || pageId === 'bag') updatePlayerAttributes();
     if (pageId === 'kungfu') renderPlayerSkills();
     if (pageId === 'shop') { renderBagExpand(); renderShopGoods(); }
@@ -761,6 +767,104 @@ export function switchPage(pageId, tabEl) {
     if (pageId === 'enhance') renderEnhance();
     if (pageId === 'craft') renderCraft();
     if (pageId === 'dungeon') renderDungeon();
+}
+
+// ---------- 江湖指引：新手任务链（可领奖的目标系统，引导前 30 分钟）----------
+// 奖励文案：把 reward 对象转成中文片段。actions 领取提示与本页奖励预览共用，避免漂移。
+const QUEST_STAT_LABEL = { hp: '气血', atk: '攻击', def: '防御', crit: '暴击', dodge: '闪避' };
+export function fmtQuestReward(reward = {}) {
+    const parts = [];
+    if (reward.coins) parts.push(`碎银+${formatNumber(reward.coins)}`);
+    if (reward.exp) parts.push(`修为+${formatNumber(reward.exp)}`);
+    if (reward.honghuangPower) parts.push(`洪荒+${reward.honghuangPower}%`);
+    if (reward.material) for (const [k, v] of Object.entries(reward.material)) parts.push(`${MATERIALS[k] ? MATERIALS[k].name : k}×${v}`);
+    if (reward.statBonus) for (const [k, v] of Object.entries(reward.statBonus)) parts.push(`永久${QUEST_STAT_LABEL[k] || k}+${v}${(k === 'crit' || k === 'dodge') ? '%' : ''}`);
+    if (reward.item) parts.push('随机装备×1');
+    if (reward.skill) parts.push('随机秘籍×1');
+    return parts.length ? parts.join(' · ') : '无';
+}
+
+// 进度文案：通关类显示「第 x / y 关」，其余显示「x / y」。
+function questProgressText(quest, progress) {
+    if (quest.type === 'clearMap') return `第 ${Math.min(progress.current, progress.target)} / ${progress.target} 关`;
+    return `${progress.current} / ${progress.target}`;
+}
+
+// 渲染「江湖指引」页：进入即静默同步进度（不弹提示）→ 概览条 + 当前推荐大卡 + 全部任务清单。
+// 容器不存在时静默跳过（未建页也安全）。
+export function renderQuestPanel() {
+    const player = state.player;
+    syncQuestProgress(player); // 进页即同步 completed/activeId（静默，不弹提示）
+    const summary = document.getElementById('quest-summary');
+    const box = document.getElementById('quest-list-box');
+    if (!summary || !box) return;
+
+    const claimed = (player.quests && player.quests.claimed) || [];
+    const total = GUIDE_QUESTS.length;
+    const doneCount = GUIDE_QUESTS.filter(q => getQuestProgress(player, q).done).length;
+    const claimedCount = claimed.length;
+    const pct = total ? Math.floor((claimedCount / total) * 100) : 0;
+    const current = getCurrentGuideQuest(player);
+
+    summary.innerHTML =
+        `<div class="achievement-summary-bar"><i style="width:${pct}%"></i></div>` +
+        `<div class="achievement-summary-text">已达成 ${doneCount}/${total} · 已领取 ${claimedCount}/${total}（${pct}%）` +
+        `${current ? ` · 当前指引：<b style="color:var(--color-gold)">${current.title}</b>` : ' · 🎉 新手指引全部完成！'}</div>`;
+
+    // 当前推荐任务（醒目大卡）
+    let html = '';
+    if (current) {
+        const p = getQuestProgress(player, current);
+        const claimable = p.done; // current 恒为「第一条未领取」，故 done 即可领取
+        html +=
+            `<div class="act-card running" style="margin-bottom:14px;">
+                <div class="act-head">
+                    <span class="act-title">🧭 当前指引 · ${current.title}</span>
+                    <span style="font-size:12px;color:${claimable ? 'var(--color-success)' : 'var(--text-muted)'};">${claimable ? '✅ 可领取' : '进行中'}</span>
+                </div>
+                <div class="act-meta" style="font-size:13px;color:#ccc;">${current.desc}</div>
+                <div class="achievement-progress" style="margin-top:8px;">
+                    <div class="achievement-progress-bar"><i style="width:${p.pct}%;background:linear-gradient(90deg,#c2a95f,#2ecc71);"></i></div>
+                    <span>${questProgressText(current, p)}</span>
+                </div>
+                <div class="act-meta">🎁 奖励：${fmtQuestReward(current.reward)}</div>
+                <div class="act-meta" style="color:#888;">📍 ${current.unlockHint}</div>
+                <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+                    ${current.page ? `<button class="btn" data-act="switch-page" data-page="${current.page}">前往</button>` : ''}
+                    <button class="btn ${claimable ? 'btn-success' : ''}" data-act="claim-quest" data-id="${current.id}" ${claimable ? '' : 'disabled'}>${claimable ? '领取奖励' : '未达成'}</button>
+                </div>
+            </div>`;
+    }
+
+    // 全部任务清单（紧凑；复用成就卡样式：可领取=绿框、已领取=金框淡显）
+    html += GUIDE_QUESTS.map(q => {
+        const p = getQuestProgress(player, q);
+        const isClaimed = claimed.includes(q.id);
+        const claimable = p.done && !isClaimed;
+        const cls = isClaimed ? 'claimed' : (claimable ? 'unlocked' : 'locked');
+        const statusTxt = isClaimed ? '✅ 已领取' : (claimable ? '🎁 可领取' : '进行中');
+        const statusCol = isClaimed ? 'var(--color-gold)' : (claimable ? 'var(--color-success)' : 'var(--text-muted)');
+        const op = isClaimed
+            ? `<button class="btn" disabled>已领取</button>`
+            : `<button class="btn ${claimable ? 'btn-success' : ''}" data-act="claim-quest" data-id="${q.id}" ${claimable ? '' : 'disabled'}>${claimable ? '领取' : '未达成'}</button>`;
+        return `<div class="achievement-card ${cls}">
+            <div class="achievement-main">
+                <div class="achievement-name">${q.order}. ${q.title} <span style="font-size:11px;color:${statusCol};font-weight:normal;">${statusTxt}</span></div>
+                <div class="achievement-desc">${q.desc}</div>
+                <div class="achievement-progress">
+                    <div class="achievement-progress-bar"><i style="width:${p.pct}%"></i></div>
+                    <span>${questProgressText(q, p)}</span>
+                </div>
+                <div class="achievement-reward">奖励：${fmtQuestReward(q.reward)}　·　📍 ${q.unlockHint}</div>
+            </div>
+            <div class="achievement-op" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+                ${q.page ? `<button class="btn" style="padding:4px 10px;" data-act="switch-page" data-page="${q.page}">前往</button>` : ''}
+                ${op}
+            </div>
+        </div>`;
+    }).join('');
+
+    box.innerHTML = html;
 }
 
 // ---------- 江湖秘典：游戏全机制说明（只读静态页）----------
