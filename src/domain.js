@@ -4,7 +4,7 @@
 // ============================================================
 import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
-    COMBAT_AFFIX_KEYS, GEAR_SLOTS
+    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS
 } from './config.js';
 
 // —— 境界名 ——
@@ -13,6 +13,91 @@ export function getRealmName(lv) {
     const sub = ((lv - 1) % 10) + 1;
     if (idx >= REALMS.length) return `至高封神第${lv}重`;
     return `${REALMS[idx]}${sub}重`;
+}
+
+function ensureAchievementState(player) {
+    if (!player.achievements || typeof player.achievements !== 'object') player.achievements = { unlocked: [], claimed: [] };
+    if (!Array.isArray(player.achievements.unlocked)) player.achievements.unlocked = [];
+    if (!Array.isArray(player.achievements.claimed)) player.achievements.claimed = [];
+    if (!Number.isFinite(player.totalKills) || player.totalKills < 0) player.totalKills = 0;
+    if (!Number.isFinite(player.totalCoinEarned) || player.totalCoinEarned < 0) player.totalCoinEarned = 0;
+    if (!Number.isFinite(player.totalForgeCount) || player.totalForgeCount < 0) player.totalForgeCount = 0;
+    if (!Number.isFinite(player.maxMapCleared) || player.maxMapCleared < 0) player.maxMapCleared = 0;
+}
+
+export function getAchievementById(id) {
+    return ACHIEVEMENTS.find(a => a.id === id) || null;
+}
+
+function getCurrentMetricValue(player, metric) {
+    switch (metric) {
+        case 'equippedLegendary':
+            return Object.values(player.equips || {}).filter(eq => eq && eq.quality === 5).length;
+        case 'skillCount':
+            return Array.isArray(player.skills) ? player.skills.length : 0;
+        case 'honghuangLevel': {
+            const hh = (player.skills || []).find(sk => sk && sk.isHongHuang);
+            return hh ? (hh.level || 0) : 0;
+        }
+        default:
+            return player[metric] || 0;
+    }
+}
+
+export function getAchievementProgress(player, achievement) {
+    ensureAchievementState(player);
+    const cur = getCurrentMetricValue(player, achievement.metric);
+    const target = achievement.target || 1;
+    return {
+        current: Math.max(0, cur),
+        target,
+        done: cur >= target,
+        pct: Math.max(0, Math.min(100, Math.floor((cur / target) * 100)))
+    };
+}
+
+export function checkAchievements(player, triggerType = 'all') {
+    ensureAchievementState(player);
+    const unlocked = new Set(player.achievements.unlocked);
+    const newlyUnlocked = [];
+    const allowByTrigger = (achievement) => {
+        if (triggerType === 'all') return true;
+        if (triggerType === 'realm') return achievement.category === 'realm';
+        if (triggerType === 'reborn') return achievement.category === 'reborn';
+        if (triggerType === 'battle') return achievement.category === 'battle' || achievement.category === 'map' || achievement.category === 'wealth';
+        if (triggerType === 'map') return achievement.category === 'map';
+        if (triggerType === 'equip') return achievement.id.startsWith('equip_');
+        if (triggerType === 'skill') return achievement.category === 'skill';
+        if (triggerType === 'forge') return achievement.id.startsWith('craft_');
+        if (triggerType === 'coin') return achievement.category === 'wealth';
+        return true;
+    };
+
+    ACHIEVEMENTS.forEach(achievement => {
+        if (unlocked.has(achievement.id) || !allowByTrigger(achievement)) return;
+        if (getAchievementProgress(player, achievement).done) {
+            unlocked.add(achievement.id);
+            newlyUnlocked.push(achievement.id);
+        }
+    });
+
+    if (newlyUnlocked.length) player.achievements.unlocked = [...unlocked];
+    return newlyUnlocked;
+}
+
+export function claimAchievementReward(player, achievementId) {
+    ensureAchievementState(player);
+    const achievement = getAchievementById(achievementId);
+    if (!achievement) return { ok: false, reason: 'not_found' };
+    if (!player.achievements.unlocked.includes(achievementId)) return { ok: false, reason: 'locked' };
+    if (player.achievements.claimed.includes(achievementId)) return { ok: false, reason: 'claimed' };
+
+    const reward = achievement.reward || {};
+    if (reward.coin) player.coin += reward.coin;
+    if (reward.exp) player.exp += reward.exp;
+    if (reward.honghuangPower) player.honghuangPower = (player.honghuangPower || 0) + reward.honghuangPower;
+    player.achievements.claimed.push(achievementId);
+    return { ok: true, reward };
 }
 
 // —— 生产技能经验曲线（纯函数）——

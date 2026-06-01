@@ -45,6 +45,13 @@ export function normalizePlayer(parsed) {
     if (p.activity === undefined) p.activity = null;
     // lastTickTime 缺失/非法时设为当前时刻：否则离线结算会因 last=0 被整段跳过（旧档升级尤甚）
     if (!Number.isFinite(p.lastTickTime) || p.lastTickTime <= 0) p.lastTickTime = Date.now();
+    if (!p.achievements || typeof p.achievements !== 'object') p.achievements = {};
+    if (!Array.isArray(p.achievements.unlocked)) p.achievements.unlocked = [];
+    if (!Array.isArray(p.achievements.claimed)) p.achievements.claimed = [];
+    if (!Number.isFinite(p.totalKills) || p.totalKills < 0) p.totalKills = 0;
+    if (!Number.isFinite(p.totalCoinEarned) || p.totalCoinEarned < 0) p.totalCoinEarned = 0;
+    if (!Number.isFinite(p.totalForgeCount) || p.totalForgeCount < 0) p.totalForgeCount = 0;
+    if (!Number.isFinite(p.maxMapCleared) || p.maxMapCleared < 0) p.maxMapCleared = 0;
     return player;
 }
 

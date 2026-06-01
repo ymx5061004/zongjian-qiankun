@@ -8,6 +8,7 @@ import { formatNumber } from '../util.js';
 import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality, unlockedGearSlots } from '../domain.js';
 import { renderBag, renderMapList, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
+import { checkAchievementsAndNotify } from './achievement.js';
 
 // 敌人火柴人 SVG（与原版一致）
 const ENEMY_SVG = `
@@ -141,6 +142,9 @@ function executeLoopBattle(mapId) {
         const expG = Math.floor(baseExp);
         player.coin += coinG;
         player.exp += expG;
+        player.totalCoinEarned = (player.totalCoinEarned || 0) + coinG;
+        player.totalKills = (player.totalKills || 0) + 1;
+        player.maxMapCleared = Math.max(player.maxMapCleared || 0, mapId);
 
         // —— 材料导向掉落 —— 每场胜利必掉「该区域档位」的矿石(喂打造/熔炼)，把战斗接进生产经济
         const regionTier = mapTier(mapId);
@@ -160,6 +164,7 @@ function executeLoopBattle(mapId) {
             // 掉落物 push 在数组末尾不影响正在拖的索引；拖拽结束(落子或取消)会补刷背包。
             if (!isDragging()) renderBag();
         }
+        checkAchievementsAndNotify('battle');
         logBattle(`✨ 胜利！碎银+${formatNumber(coinG)}，修为+${formatNumber(expG)}。${bonus}`);
     } else {
         const loseCoin = Math.floor(player.coin * BALANCE.reward.loseCoinRate);
