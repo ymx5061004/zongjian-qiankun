@@ -76,7 +76,7 @@ export function renderAchievementPanel() {
             const claimed = state.player.achievements.claimed.includes(ac.id);
             const progress = getAchievementProgress(state.player, ac);
             const card = document.createElement('div');
-            card.className = `achievement-card ${unlocked ? 'unlocked' : 'locked'} ${claimed ? 'claimed' : ''}`;
+            card.className = `achievement-card ${claimed ? 'claimed' : (unlocked ? 'unlocked' : 'locked')}`;
             card.innerHTML = `
                 <div class="achievement-main">
                     <div class="achievement-name">${unlocked ? '🏆' : '🔒'} ${ac.name}</div>

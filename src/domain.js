@@ -6,6 +6,7 @@ import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
     COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS
 } from './config.js';
+const LEGENDARY_QUALITY = 5;
 
 // —— 境界名 ——
 export function getRealmName(lv) {
@@ -32,7 +33,7 @@ export function getAchievementById(id) {
 function getCurrentMetricValue(player, metric) {
     switch (metric) {
         case 'equippedLegendary':
-            return Object.values(player.equips || {}).filter(eq => eq && eq.quality === 5).length;
+            return Object.values(player.equips || {}).filter(eq => eq && eq.quality === LEGENDARY_QUALITY).length;
         case 'skillCount':
             return Array.isArray(player.skills) ? player.skills.length : 0;
         case 'honghuangLevel': {
