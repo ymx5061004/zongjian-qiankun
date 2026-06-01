@@ -3,9 +3,9 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS, CULTIVATION_PATHS } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS, CULTIVATION_PATHS, CRAFT_AFFIXES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById } from '../domain.js';
 import { formatNumber } from '../util.js';
 import { renderAchievementPanel } from './achievement.js';
 
@@ -358,6 +358,11 @@ export function rollShopGoods() {
         sk.price = 6000;
         shopGoods.push({ kind: 'skill', obj: sk });
     }
+    // 第五阶段·黑市应急材料（价偏高=4×回收价，应急补料用，不能取代采集）：低档矿石/草药
+    [{ key: 'ore_copper', qty: 20 }, { key: 'ore_iron', qty: 10 }, { key: 'herb_1', qty: 15 }].forEach(m => {
+        const unit = MATERIALS[m.key] ? (MATERIALS[m.key].price || 10) : 10;
+        shopGoods.push({ kind: 'material', key: m.key, qty: m.qty, price: Math.round(unit * m.qty * 4) });
+    });
     renderShopGoods();
 }
 
@@ -380,6 +385,10 @@ export function renderShopGoods() {
         if (g.kind === 'item') {
             const it = g.obj;
             card.innerHTML = `<span data-tip='${tipAttr(it)}' style="cursor:help;"><b class="q-${it.quality}">[装备] ${it.name} 🔍</b></span><button class="btn btn-success" data-act="buy-item" data-idx="${idx}">购买 (${it.price}文)</button>`;
+        } else if (g.kind === 'material') {
+            const mn = MATERIALS[g.key] ? MATERIALS[g.key].name : g.key;
+            const ico = MATERIALS[g.key] ? MATERIALS[g.key].icon : '📦';
+            card.innerHTML = `<span><b>${ico} [材料] ${mn} ×${g.qty}</b> <small style="color:var(--text-muted)">应急补料·价偏高</small></span><button class="btn" data-act="buy-material" data-idx="${idx}">购买 (${formatNumber(g.price)}文)</button>`;
         } else if (g.obj.isHongHuang) {
             const hhSkill = g.obj;
             const bookItem = { name: `禁忌秘籍·《${hhSkill.name}》`, type: "book", payload: hhSkill, price: hhSkill.price };
@@ -513,6 +522,11 @@ function activityCardHtml(act, player) {
     if (act.craftItem) outParts.push('随机神兵→行囊');
     const effDur = effDurationMs(act.durationMs, lv);
     const meta = [`产出 ${outParts.join('、')}`, `经验+${act.exp}`, `${(effDur / 1000).toFixed(1)}秒`];
+    // 每小时预估产出（按当前提速读条；不计离线/双倍，故为保守下限）
+    if (act.outputs) {
+        const [k0, n0] = Object.entries(act.outputs)[0];
+        meta.push(`约 ${formatNumber(Math.round(3600000 / effDur * n0))} ${matName(k0)}/时`);
+    }
     if (act.inputs) {
         const inParts = Object.entries(act.inputs).map(([k, n]) => `${matName(k)}×${n}`);
         meta.push(`消耗 ${inParts.join('、')}`);
@@ -557,16 +571,27 @@ export function renderProduction() {
 }
 
 // 渲染物料仓库（采矿/锻造两页各有一个容器，内容相同：列出所有持有量>0 的物料）。
+// 物料用途提示（第五阶段）：让玩家明白每种料能干什么，并体会「同一批料只能挪作一处」的选择成本。
+function matUsage(k) {
+    if (k.startsWith('ore_')) return '熔炼→锭';
+    if (k.startsWith('ingot_')) return '强化 / 打造';
+    if (k.startsWith('herb_')) return '炼丹';
+    if (k === 'soul_crystal') return '神兵进阶';
+    return '';
+}
 export function renderWarehouse() {
     const player = state.player;
+    const advice = `<div class="prof-exp-text" style="margin-bottom:6px;color:var(--color-blue);">📌 ${pathProductionAdvice(player)}</div>`;
+    const legend = `<div class="prof-exp-text" style="margin-bottom:8px;font-size:11px;">用途：矿石→熔炼成锭；锭→强化神兵 / 打造装备（二者抢同一产能）；草药→炼丹；神魂结晶→神兵进阶。</div>`;
     const keys = Object.keys(MATERIALS).filter(k => (player.materials[k] || 0) > 0 && !MATERIALS[k].pill); // 丹药不入仓库(改在丹房服用)
-    const html = keys.length
+    const grid = keys.length
         ? `<div class="wh-grid">` + keys.map(k => {
-            const qty = player.materials[k], price = MATERIALS[k].price || 0;
+            const qty = player.materials[k], price = MATERIALS[k].price || 0, use = matUsage(k);
             const sell = price > 0 ? `<button class="btn wh-sell" data-act="sell-material" data-key="${k}">卖 ${formatNumber(qty * price)}文</button>` : '';
-            return `<div class="wh-item"><div class="wh-ico">${MATERIALS[k].icon}</div>${MATERIALS[k].name}<br><span class="wh-qty">${formatNumber(qty)}</span>${sell}</div>`;
+            return `<div class="wh-item"><div class="wh-ico">${MATERIALS[k].icon}</div>${MATERIALS[k].name}<br><span class="wh-qty">${formatNumber(qty)}</span>${use ? `<div style="font-size:9px;color:var(--text-muted);">${use}</div>` : ''}${sell}</div>`;
         }).join('') + `</div>`
         : `<div class="wh-empty">— 仓库空空如也，去采矿 / 熔炼积攒物料吧 —</div>`;
+    const html = advice + legend + grid;
     ['warehouse-mining', 'warehouse-smithing', 'warehouse-herb', 'warehouse-alchemy'].forEach(id => {
         const box = document.getElementById(id);
         if (box) box.innerHTML = html;
@@ -649,8 +674,10 @@ export function renderEnhance() {
 }
 
 // ---------- 打造图谱页（按档×部位确定性打造命名套装；档由采矿/锻造等级解锁）----------
-let selectedCraftTier = 0; // 0=未选(首次打开自动落到已解锁最高档)
+let selectedCraftTier = 0;          // 0=未选(首次打开自动落到已解锁最高档)
+let selectedCraftAffix = 'none';    // 第五阶段：当前选中的打造副词条（模块级，不入存档）
 export function selectCraftTier(tier) { selectedCraftTier = tier; renderCraft(); }
+export function selectCraftAffix(id) { selectedCraftAffix = id; renderCraft(); }
 
 export function renderCraft() {
     const player = state.player;
@@ -677,18 +704,33 @@ export function renderCraft() {
     const have = player.materials[cost.ingotKey] || 0;
     const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
     const slots = unlockedGearSlots(player.realmLevel);
-    const setLine = `<div class="prof-exp-text" style="margin-bottom:10px;">完整 ${T.name} 套装(${slots.length} 件)：耗 ${matName}×${cost.ingotQty * slots.length} + 碎银 ${formatNumber(cost.coin * slots.length)}（强化另计）</div>`;
-    box.innerHTML = setLine + slots.map(({ key: slot }) => {
+
+    // —— 第五阶段：流派建议 + 副词条选择器（★ 标记契合当前流派的词条）——
+    const path = getActivePath(player);
+    if (selectedCraftAffix !== 'none' && !getCraftAffixById(selectedCraftAffix)) selectedCraftAffix = 'none';
+    const curAffix = getCraftAffixById(selectedCraftAffix) || getCraftAffixById('none');
+    const needIngot = cost.ingotQty + (curAffix.extraIngot || 0);
+    const adviceLine = `<div class="prof-exp-text" style="margin-bottom:8px;color:var(--color-blue);">📌 ${pathProductionAdvice(player)}${path && path.mods && path.mods.craftQualityBonus ? '（器修：打造更易出高成色）' : ''}</div>`;
+    const affixBtns = CRAFT_AFFIXES.map(a => {
+        const rec = path && a.path === path.id;
+        return `<button class="craft-tab ${a.id === selectedCraftAffix ? 'active' : ''}" data-act="select-craft-affix" data-affix="${a.id}" title="${a.desc}">${a.name}${rec ? '★' : ''}</button>`;
+    }).join('');
+    const affixLine = `<div style="margin-bottom:6px;"><span style="font-size:12px;color:var(--text-muted);">副词条：</span><span class="craft-tabs">${affixBtns}</span></div>` +
+        `<div class="prof-exp-text" style="margin-bottom:10px;">${curAffix.desc}${curAffix.extraIngot ? ` <span style="color:var(--color-accent)">（额外耗 ${matName}×${curAffix.extraIngot}）</span>` : ''}</div>`;
+    const setLine = `<div class="prof-exp-text" style="margin-bottom:10px;">完整 ${T.name} 套装(${slots.length} 件)：每件耗 ${matName}×${needIngot} + 碎银 ${formatNumber(cost.coin)}（副词条与强化另计）</div>`;
+
+    box.innerHTML = adviceLine + affixLine + setLine + slots.map(({ key: slot }) => {
         const pv = makeGearPiece(selectedCraftTier, slot, 0); // 预览(凡品成色)属性
         const statStr = ['atk', 'def', 'hp', 'crit', 'dodge'].filter(k => pv[k])
             .map(k => `${({ atk: '攻', def: '防', hp: '血', crit: '暴', dodge: '闪' })[k]} ${pv[k]}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('　');
-        const okMat = have >= cost.ingotQty, okCoin = player.coin >= cost.coin, okBag = player.bag.length < player.bagMax;
+        const okMat = have >= needIngot, okCoin = player.coin >= cost.coin, okBag = player.bag.length < player.bagMax;
         const matCol = okMat ? 'var(--color-success)' : 'var(--color-accent)';
         const coinCol = okCoin ? 'var(--color-gold)' : 'var(--color-accent)';
+        const affixTag = selectedCraftAffix !== 'none' ? ` · <span style="color:var(--color-orange)">${curAffix.name}</span>` : '';
         return `<div class="act-card">
-            <div class="act-head"><span class="act-title">${T.name}·${GEAR_SLOT_LABEL[slot]}</span>
-                <button class="btn btn-success" data-act="craft-gear" data-tier="${selectedCraftTier}" data-slot="${slot}" ${okMat && okCoin && okBag ? '' : 'disabled'}>🛡 打造</button></div>
-            <div class="act-meta">${statStr}<br>耗 <span style="color:${matCol}">${matName}×${cost.ingotQty}(有${formatNumber(have)})</span> · <span style="color:${coinCol}">碎银 ${formatNumber(cost.coin)}</span>${okBag ? '' : ' · <span style="color:var(--color-accent)">行囊已满</span>'} · 成色随机</div>
+            <div class="act-head"><span class="act-title">${curAffix.id !== 'none' ? curAffix.name + '·' : ''}${T.name}·${GEAR_SLOT_LABEL[slot]}</span>
+                <button class="btn btn-success" data-act="craft-gear" data-tier="${selectedCraftTier}" data-slot="${slot}" data-affix="${selectedCraftAffix}" ${okMat && okCoin && okBag ? '' : 'disabled'}>🛡 打造</button></div>
+            <div class="act-meta">${statStr}${affixTag}<br>耗 <span style="color:${matCol}">${matName}×${needIngot}(有${formatNumber(have)})</span> · <span style="color:${coinCol}">碎银 ${formatNumber(cost.coin)}</span>${okBag ? '' : ' · <span style="color:var(--color-accent)">行囊已满</span>'} · 成色随机</div>
         </div>`;
     }).join('');
 }

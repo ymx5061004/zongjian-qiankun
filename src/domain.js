@@ -4,7 +4,7 @@
 // ============================================================
 import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
-    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS, CULTIVATION_PATHS, MAP_MODIFIERS
+    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS, CULTIVATION_PATHS, MAP_MODIFIERS, CRAFT_AFFIXES
 } from './config.js';
 const LEGENDARY_QUALITY = 5;
 
@@ -606,6 +606,40 @@ export function makeGearPiece(tier, slot, quality = 0) {
         type: slot, tier, quality, atk, def, hp, crit, dodge,
         price: Math.floor(BALANCE.itemPrice.base * Math.pow(BALANCE.itemPrice.growth, quality))
     };
+}
+
+// ============================================================
+// 第五阶段·打造副词条 + 生产建议（纯逻辑）。
+// ============================================================
+export function getCraftAffixById(id) { return CRAFT_AFFIXES.find(a => a.id === id) || null; }
+
+// 给打造出的装备施加副词条（按档 tier 缩放，就地改 piece 并返回）。'none'/'refine' 不改五维（refine 走成色，在 craftGear 处理）。
+// 仅改 atk/def/hp/crit/dodge（computeStats 装备层只读这五项），不会引入 NaN；闪避受 75 上限保护。
+export function applyCraftAffix(piece, affixId, tier) {
+    const a = getCraftAffixById(affixId);
+    if (!a || a.id === 'none' || a.id === 'refine' || !piece) return piece;
+    const t = tier || piece.tier || 1;
+    switch (a.id) {
+        case 'sharp': piece.crit = (piece.crit || 0) + Math.round(t * 2 + 4); break;                          // 剑修：暴击
+        case 'guard': piece.def = Math.floor((piece.def || 0) * 1.15); piece.hp = Math.floor((piece.hp || 0) * 1.10); break; // 体修：防御+气血
+        case 'swift': piece.dodge = Math.min(75, (piece.dodge || 0) + Math.round(t * 1.5 + 2)); break;        // 身法：闪避
+        case 'venom': piece.atk = Math.floor((piece.atk || 0) * 1.08); piece.crit = (piece.crit || 0) + Math.round(t * 1.5); break; // 毒修：攻击+暴击
+    }
+    piece.name = `${a.name}·${piece.name}`; // 名称冠以副词条，便于辨识
+    return piece;
+}
+
+// 根据当前流派给一句生产/打造建议（UI 展示用）。未择道则提示先确立方向。
+export function pathProductionAdvice(player) {
+    const id = player ? player.cultivationPath : null;
+    switch (id) {
+        case 'sword':   return '剑修建议：优先强化高暴击装备，打造「锋锐」兵刃/暗器。';
+        case 'body':    return '体修建议：堆气血/防御，打造「坚铠」防具，多采药备突破。';
+        case 'agility': return '身法建议：优先闪避装备，打造「轻灵」护符/战靴。';
+        case 'poison':  return '毒修建议：多采药炼丹，打造「淬毒」暗器，毒瘴地图如鱼得水。';
+        case 'artisan': return '器修建议：多挖矿多强化多打造，「精工」副词条必出高成色。';
+        default:        return '尚未择道：先去「修行流派」确立方向，再针对性备料打造。';
+    }
 }
 
 // 当前境界已解锁的装备部位（按 GEAR_SLOTS.realmReq 过滤）。掉落/打造/装备共用，保证不出现「拿到却装不了」的部位。

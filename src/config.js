@@ -606,3 +606,18 @@ export const MAP_MODIFIERS = [
         combat: { dodgeReduction: 10, envDmgPctMaxHp: 2, envLabel: '雷光过境' }, reward: {}
     }
 ];
+
+// ============================================================
+// 第五阶段·打造副词条（生产↔流派绑定）：打造装备时可选一种「副词条」，按流派风格小幅加成。
+// 选择成本：每件只能选一种副词条，且额外多耗 extraIngot 个同档锭（吃同一套采矿→熔炼产能）。
+//   id/name/desc：展示；path：契合流派（用于「推荐」高亮）；extraIngot：额外锭消耗；
+//   实际数值在 domain.applyCraftAffix（按档 tier 缩放）；'refine' 走成色 +1（在 craftGear 处理）。
+// ============================================================
+export const CRAFT_AFFIXES = [
+    { id: 'none',   name: '无',   path: null,      desc: '普通打造，无额外词条、无额外耗材。',         extraIngot: 0 },
+    { id: 'sharp',  name: '锋锐', path: 'sword',   desc: '注入锋锐之意——暴击提升（宜剑修）。',         extraIngot: 2 },
+    { id: 'guard',  name: '坚铠', path: 'body',    desc: '淬炼坚铠之体——防御与气血提升（宜体修）。',   extraIngot: 2 },
+    { id: 'swift',  name: '轻灵', path: 'agility', desc: '附身法之轻灵——闪避提升（宜身法）。',         extraIngot: 2 },
+    { id: 'venom',  name: '淬毒', path: 'poison',  desc: '暗器淬毒——攻击与暴击提升（宜毒修暗器）。',   extraIngot: 2 },
+    { id: 'refine', name: '精工', path: 'artisan', desc: '匠心精工——成色必再升一阶（宜器修）。',       extraIngot: 3 }
+];

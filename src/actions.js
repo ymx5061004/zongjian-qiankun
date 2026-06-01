@@ -4,7 +4,7 @@
 // ============================================================
 import { state } from './state.js';
 import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES, GEAR_SLOTS } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost } from './domain.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost, getCraftAffixById, applyCraftAffix } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
@@ -490,27 +490,30 @@ export function upgradeGear(slot) {
 
 // —— 打造图谱：按「档(tier)+部位」确定性打造一件命名套装件进背包（梅尔沃式爬阶梯的核心）。
 //    门控=锻造等级；耗对应档位的锭+碎银；成色(品阶)随机微调。装备主来源之一(前/中期)。——
-export function craftGear(tier, slot) {
+export function craftGear(tier, slot, affixId = 'none') {
     const player = state.player;
     const T = GEAR_TIERS[tier - 1];
     if (!T) return;
     const smLv = levelFromExp(player.professions.smithing.exp);
     if (smLv < T.smithingReq) { toast(`需【锻造】${T.smithingReq} 级才能打造 ${T.name} 装备。`, 'error'); return; }
-    if (player.bag.length >= player.bagMax) { toast("行囊已满，先腾空间或去黑市扩容。", 'error'); return; }
+    if (player.bag.length >= player.bagMax) { toast("行囊已满，先腾空间或去黑市扩容。", 'error'); return; } // 背包满：拒绝并提示
+    const affix = getCraftAffixById(affixId) || getCraftAffixById('none');
     const cost = gearCraftCost(tier);
+    const needIngot = cost.ingotQty + (affix.extraIngot || 0);          // 副词条额外耗同档锭（与强化/打造共用产能=选择成本）
     const have = player.materials[cost.ingotKey] || 0;
     const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
-    if (have < cost.ingotQty) { toast(`${matName}不足：需 ${cost.ingotQty}，现有 ${have}。`, 'error'); return; }
+    if (have < needIngot) { toast(`${matName}不足：需 ${needIngot}${affix.extraIngot ? `（含「${affix.name}」+${affix.extraIngot}）` : ''}，现有 ${have}。`, 'error'); return; }
     if (player.coin < cost.coin) { toast(`碎银不足：打造需 ${cost.coin} 文。`, 'error'); return; }
 
-    player.materials[cost.ingotKey] -= cost.ingotQty;
+    player.materials[cost.ingotKey] -= needIngot;
     if (player.materials[cost.ingotKey] <= 0) delete player.materials[cost.ingotKey];
     player.coin -= cost.coin;
     let q = rollQuality();
     // 器修：打造更易出高成色（小幅 +1 成色概率；无派/非器修不触发）
     const path = getActivePath(player);
     if (path && path.mods && path.mods.craftQualityBonus && q < 5 && Math.random() < 0.25 * path.mods.craftQualityBonus) q++;
-    const piece = makeGearPiece(tier, slot, q);
+    if (affix.id === 'refine' && q < 5) q++;                            // 精工副词条：成色必再升一阶
+    const piece = applyCraftAffix(makeGearPiece(tier, slot, q), affixId, tier); // 施加副词条（none 时原样返回）
     player.bag.push(piece);
     bumpAchStat(player, 'craftCount');                                  // 成就：千锤百炼
     if (q >= 4) bumpAchStat(player, 'gotHighQuality');                  // 成就：今天手气不错（史诗+）
@@ -522,6 +525,24 @@ export function craftGear(tier, slot) {
     checkAchievementsAndNotify('all');                                  // 打造类成就检测（千锤百炼/手气不错）
     saveGame();
     toast(`🛡️ 打造成功：【${piece.name}】（${QUALITY_NAMES[q]}成色）！`, 'success');
+}
+
+// —— 黑市常驻：花碎银购买基础材料（价偏高，应急用，不能取代采集）。——
+export function buyShopMaterial(idx) {
+    const player = state.player;
+    const good = getShopGood(idx);
+    if (!good || good.kind !== 'material') return;
+    if (player.coin < good.price) { toast("碎银不足！", 'error'); return; }
+    player.coin -= good.price;
+    player.materials[good.key] = (player.materials[good.key] || 0) + good.qty;
+    removeShopGood(idx);
+    hideTooltip();
+    renderShopGoods();
+    renderWarehouse();        // 若仓库页可见则刷新（不可见则静默）
+    updatePlayerAttributes(); // 顶栏碎银
+    saveGame();
+    const mn = MATERIALS[good.key] ? MATERIALS[good.key].name : good.key;
+    toast(`购入【${mn}】×${good.qty}。`, 'success');
 }
 
 // —— 神兵强化：用锭+碎银把「已装备」的装备 +1（永久放大攻/防/血）。

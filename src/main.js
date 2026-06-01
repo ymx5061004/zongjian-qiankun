@@ -10,7 +10,7 @@ import {
     initTooltipEvent, hideTooltip, switchPage,
     updatePlayerAttributes, renderForge, renderBag,
     renderMapList, renderPlayerSkills, rollShopGoods,
-    renderProduction, renderWarehouse, selectCraftTier,
+    renderProduction, renderWarehouse, selectCraftTier, selectCraftAffix,
     toggleMenu, closeMenu
 } from './ui/render.js';
 import { startHangup, stopHangup } from './ui/battle.js';
@@ -24,7 +24,7 @@ import {
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
     enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
     exportSaveFile, importSaveFile, buyBagSlot, takePill,
-    claimGuideQuestReward, recordShopVisit, selectCultivationPath
+    claimGuideQuestReward, recordShopVisit, selectCultivationPath, buyShopMaterial
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -109,8 +109,9 @@ function onDelegatedClick(e) {
         case 'reborn': triggerReborn(); break;
         case 'unequip': unequip(el.dataset.slot); break;
         case 'enhance-equip': enhanceEquip(el.dataset.slot); break;
-        case 'craft-gear': craftGear(Number(el.dataset.tier), el.dataset.slot); break;
+        case 'craft-gear': craftGear(Number(el.dataset.tier), el.dataset.slot, el.dataset.affix); break;
         case 'select-craft-tier': selectCraftTier(Number(el.dataset.tier)); break;
+        case 'select-craft-affix': selectCraftAffix(el.dataset.affix); break;
         case 'challenge-boss': challengeBoss(el.dataset.boss); break;
         case 'upgrade-gear': upgradeGear(el.dataset.slot); break;
         case 'sell-material': sellMaterial(el.dataset.key); break;
@@ -130,6 +131,7 @@ function onDelegatedClick(e) {
         case 'learn-all': learnAllSkills(); break;
         case 'buy-item': buyShopItem(Number(el.dataset.idx)); break;
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
+        case 'buy-material': buyShopMaterial(Number(el.dataset.idx)); break;
         case 'claim-achievement': if (claimAchievementReward(el.dataset.id)) { updatePlayerAttributes(); checkAchievementsAndNotify('coin'); saveGame(); } break;
         case 'filter-achievement': setAchievementFilter(el.dataset.cat); break;
         case 'claim-quest': claimGuideQuestReward(el.dataset.id); break;
