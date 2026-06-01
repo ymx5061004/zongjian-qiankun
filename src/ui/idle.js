@@ -11,6 +11,7 @@ import { renderProduction, renderWarehouse, renderBag, updatePlayerAttributes } 
 import { isDragging } from './drag.js';
 import { toast, infoDialog } from './dialog.js';
 import { formatNumber } from '../util.js';
+import { checkAchievementsAndNotify } from './achievement.js';
 
 const ACT_MAP = Object.fromEntries(ACTIVITIES.map(a => [a.id, a]));
 export function getActivity(id) { return ACT_MAP[id]; }
@@ -62,7 +63,11 @@ function runOnce(act) {
     if (act.craftItem) {
         const gear = generateItemByMatrix(act.craftItem);
         if (player.bag.length < player.bagMax) { player.bag.push(gear); item = gear; }
-        else { soldCoin = gear.price; player.coin += gear.price; }
+        else {
+            soldCoin = gear.price;
+            player.coin += gear.price;
+            player.totalCoinEarned = (player.totalCoinEarned || 0) + gear.price;
+        }
     }
     player.professions[act.prof].exp += act.exp;
     return { ok: true, yielded, doubled: mult > 1, item, soldCoin };
@@ -92,6 +97,7 @@ function tick() {
     // 打造产物入背包 / 满袋自动售卖 → 刷新背包与顶栏(碎银)。
     // 拖拽进行中不重渲背包（会销毁拖动源 → pointercancel 中止拖拽），拖完再补刷。
     if ((r.item || r.soldCoin) && !isDragging()) { renderBag(); updatePlayerAttributes(); }
+    if (r.soldCoin) checkAchievementsAndNotify('coin');
 }
 
 // —— 开始一个生产动作（先做等级/原料/背包校验）——

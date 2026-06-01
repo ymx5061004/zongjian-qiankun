@@ -19,7 +19,12 @@ export function makeDefaultPlayer() {
         materials: {},                 // 可堆叠物料仓库 { 物料key: 数量 }
         pillBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }, // 丹药永久根骨增益（服丹累加，跨轮回保留）
         activity: null,                // 当前挂机生产动作 id（与战斗挂机互斥）；存档保留以便读档续挂+离线结算
-        lastTickTime: 0                // 上次存活时间戳（saveGame 时刷新）；读档据此结算离线产出
+        lastTickTime: 0,               // 上次存活时间戳（saveGame 时刷新）；读档据此结算离线产出
+        achievements: { unlocked: [], claimed: [] },
+        totalKills: 0,
+        totalCoinEarned: 0,
+        totalForgeCount: 0,
+        maxMapCleared: 0
     };
 }
 

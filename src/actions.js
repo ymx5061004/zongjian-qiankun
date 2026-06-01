@@ -13,6 +13,14 @@ import {
 import { saveGame, exportSaveString, importSaveString } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
 import { formatNumber } from './util.js';
+import { checkAchievementsAndNotify } from './ui/achievement.js';
+
+function gainCoin(player, amount, triggerType = 'coin') {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    player.coin += amount;
+    player.totalCoinEarned = (player.totalCoinEarned || 0) + amount;
+    checkAchievementsAndNotify(triggerType);
+}
 
 // —— 破境冲关 ——
 export function playerBreakthrough() {
@@ -27,6 +35,7 @@ export function playerBreakthrough() {
     const unlockedSlot = GEAR_SLOTS.find(s => s.realmReq === player.realmLevel); // 本次突破是否恰好解锁新部位
     updatePlayerAttributes();
     renderMapList();
+    checkAchievementsAndNotify('realm');
     saveGame();
     if (unlockedSlot) toast(`🎉 突破${getRealmName(player.realmLevel)}，解锁新装备部位【${unlockedSlot.label}】！`, 'success');
 }
@@ -45,6 +54,7 @@ export async function triggerReborn() {
     toast("✨ 成功破碎虚空轮回转世！", 'success');
     updatePlayerAttributes();
     renderMapList();
+    checkAchievementsAndNotify('reborn');
     saveGame();
 }
 
@@ -165,12 +175,14 @@ export function executeForge() {
     player.coin -= cost;
 
     const resultItem = computeForgeResult(i1, i2, player.realmLevel, cost);
+    player.totalForgeCount = (player.totalForgeCount || 0) + 1;
     state.forgeItems = [null, null];
     player.bag.push(resultItem);
     hideTooltip();
     renderForge();
     renderBag();
     updatePlayerAttributes();
+    checkAchievementsAndNotify('forge');
     saveGame();
     toast(`⚡ 洪炉轰鸣！消耗 ${cost} 文碎银，成功炼制出：【${resultItem.name}】！`, 'success');
 }
@@ -182,7 +194,7 @@ export function smeltByQuality(qualities, label) {
     const { remain, gold } = partitionByQuality(player.bag, qualities);
     if (player.bag.length === remain.length) { toast("没有符合条件的装备可熔炼。", 'error'); return; }
     player.bag = remain;
-    player.coin += gold;
+    gainCoin(player, gold, 'coin');
     renderBag();
     updatePlayerAttributes();
     saveGame();
@@ -197,7 +209,7 @@ export async function smeltAllItems() {
     if (!ok) return;
     const { remain, gold } = partitionAllGear(player.bag);
     player.bag = remain;
-    player.coin += gold;
+    gainCoin(player, gold, 'coin');
     renderBag();
     updatePlayerAttributes();
     saveGame();
@@ -270,7 +282,7 @@ export async function useBagItem(idx) {
         renderBag();
         saveGame();
     } else if (action === "3") {
-        player.coin += item.price;
+        gainCoin(player, item.price, 'coin');
         player.bag.splice(curIdx, 1);
         renderBag();
         updatePlayerAttributes();
@@ -283,11 +295,13 @@ export async function useBagItem(idx) {
             const old = player.equips[item.type];
             player.equips[item.type] = item;
             if (old) player.bag[curIdx] = old; else player.bag.splice(curIdx, 1);
+            checkAchievementsAndNotify('equip');
         } else {
             if (player.skills.find(s => s.name === item.payload.name)) { toast("你早已对此门武学烂熟于心。", 'error'); return; }
             player.skills.push(item.payload);
             player.bag.splice(curIdx, 1);
             toast(`✨ 成功参悟绝学：《${item.payload.name}》！`, 'success');
+            checkAchievementsAndNotify('skill');
             renderPlayerSkills();
         }
         renderBag();
@@ -310,7 +324,7 @@ export async function sellMaterial(key) {
     if (qty <= 0) return;
     const gain = qty * mat.price;
     delete player.materials[key];
-    player.coin += gain;
+    gainCoin(player, gain, 'coin');
     renderWarehouse();
     updatePlayerAttributes();
     saveGame();
@@ -328,7 +342,7 @@ export function challengeBoss(bossId) {
     if (!enemyDead) { toast(`不敌【${boss.name}】！再砥砺战力(强化/进阶/轮回)后来战。`, 'error'); return; }
     const crystal = boss.crystalMin + Math.floor(Math.random() * (boss.crystalMax - boss.crystalMin + 1));
     player.materials.soul_crystal = (player.materials.soul_crystal || 0) + crystal;
-    player.coin += boss.coin;
+    gainCoin(player, boss.coin, 'coin');
     renderDungeon();
     updatePlayerAttributes();
     saveGame();
@@ -440,6 +454,7 @@ export function upgradePlayerSkill(idx) {
     player.exp -= cost;
     sk.level++;
     toast(`【突破】《${sk.name}》精进至第【${sk.level}】重！`, 'success');
+    checkAchievementsAndNotify('skill');
     renderPlayerSkills();
     updatePlayerAttributes();
     saveGame();
@@ -480,6 +495,7 @@ export function learnAllSkills() {
         learned++;
     });
     player.bag = remain;
+    if (learned > 0) checkAchievementsAndNotify('skill');
     renderPlayerSkills();
     renderBag();
     updatePlayerAttributes();

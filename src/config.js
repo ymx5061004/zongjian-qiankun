@@ -88,6 +88,56 @@ export const MAP_NAMES = [
     "九重天", "圣皇都", "神隐界", "造化府", "混沌海", "极境之渊", "至尊殿", "永恒领域", "终焉神座", "虚空尽头"
 ];
 
+export const ACHIEVEMENT_CATEGORIES = {
+    realm: "修为成就",
+    reborn: "轮回成就",
+    map: "地图探索",
+    battle: "战斗成就",
+    equip: "装备成就",
+    skill: "秘籍成就",
+    wealth: "财富成就"
+};
+
+export const ACHIEVEMENTS = [
+    // 修为成就
+    { id: 'realm_5', category: 'realm', name: '破碎虚空', desc: '修为突破到第5重', target: 5, metric: 'realmLevel', reward: { coin: 10000 } },
+    { id: 'realm_20', category: 'realm', name: '天仙降临', desc: '修为突破到第20重', target: 20, metric: 'realmLevel', reward: { coin: 60000 } },
+    { id: 'realm_50', category: 'realm', name: '至尊霸业', desc: '修为突破到第50重', target: 50, metric: 'realmLevel', reward: { coin: 200000 } },
+    { id: 'realm_100', category: 'realm', name: '天帝之位', desc: '修为突破到第100重', target: 100, metric: 'realmLevel', reward: { coin: 500000, exp: 200000 } },
+
+    // 轮回成就
+    { id: 'reborn_1', category: 'reborn', name: '初涉轮回', desc: '第一次轮回转世', target: 1, metric: 'rebornCount', reward: { coin: 50000 } },
+    { id: 'reborn_5', category: 'reborn', name: '命运之轮', desc: '轮回5次', target: 5, metric: 'rebornCount', reward: { coin: 200000 } },
+    { id: 'reborn_10', category: 'reborn', name: '轮回大道', desc: '轮回10次', target: 10, metric: 'rebornCount', reward: { coin: 600000 } },
+
+    // 地图探索
+    { id: 'map_10', category: 'map', name: '初出茅庐', desc: '通过第10关', target: 10, metric: 'maxMapCleared', reward: { coin: 30000 } },
+    { id: 'map_20', category: 'map', name: '武林新秀', desc: '通过第20关', target: 20, metric: 'maxMapCleared', reward: { coin: 80000 } },
+    { id: 'map_50', category: 'map', name: '荡平诸邪', desc: '通过第50关', target: 50, metric: 'maxMapCleared', reward: { coin: 250000 } },
+    { id: 'map_100', category: 'map', name: '天下无敌', desc: '通过第100关', target: 100, metric: 'maxMapCleared', reward: { coin: 800000 } },
+
+    // 战斗成就
+    { id: 'kill_100', category: 'battle', name: '斩妖除魔', desc: '击败100个敌人', target: 100, metric: 'totalKills', reward: { coin: 50000 } },
+    { id: 'kill_1000', category: 'battle', name: '杀戮之王', desc: '击败1000个敌人', target: 1000, metric: 'totalKills', reward: { coin: 300000 } },
+    { id: 'kill_10000', category: 'battle', name: '末世屠神', desc: '击败10000个敌人', target: 10000, metric: 'totalKills', reward: { coin: 2000000 } },
+
+    // 装备成就
+    { id: 'equip_2_legendary', category: 'equip', name: '初得传说', desc: '装备2件神话品质装备', target: 2, metric: 'equippedLegendary', reward: { coin: 120000 } },
+    { id: 'equip_6_legendary', category: 'equip', name: '神装加身', desc: '装备6件神话品质装备', target: 6, metric: 'equippedLegendary', reward: { coin: 600000 } },
+    { id: 'craft_10', category: 'equip', name: '初识锻造', desc: '通过洪炉合成10次', target: 10, metric: 'totalForgeCount', reward: { coin: 120000 } },
+    { id: 'craft_50', category: 'equip', name: '锻造大师', desc: '通过洪炉合成50次', target: 50, metric: 'totalForgeCount', reward: { coin: 800000 } },
+
+    // 秘籍成就
+    { id: 'skill_5', category: 'skill', name: '初入道门', desc: '掌握5门秘籍', target: 5, metric: 'skillCount', reward: { exp: 20000 } },
+    { id: 'skill_10', category: 'skill', name: '百般武艺', desc: '掌握10门秘籍', target: 10, metric: 'skillCount', reward: { exp: 80000 } },
+    { id: 'honghuang_lv10', category: 'skill', name: '洪荒觉醒', desc: '老区长混沌诀达到10重', target: 10, metric: 'honghuangLevel', reward: { coin: 300000 } },
+    { id: 'honghuang_lv50', category: 'skill', name: '洪荒之主', desc: '老区长混沌诀达到50重', target: 50, metric: 'honghuangLevel', reward: { coin: 2000000 } },
+
+    // 财富成就
+    { id: 'coin_10w', category: 'wealth', name: '小有资财', desc: '累计获得碎银100万文', target: 1000000, metric: 'totalCoinEarned', reward: { exp: 50000 } },
+    { id: 'coin_100w', category: 'wealth', name: '财富巨龙', desc: '累计获得碎银1000万文', target: 10000000, metric: 'totalCoinEarned', reward: { exp: 300000 } }
+];
+
 export const epicStory = [
     "混沌初开，大道崩坏。",
     "你曾是上古时期傲视万界的无上天尊，却在纪元劫难中身陨，真灵遁入轮回。",

@@ -17,6 +17,7 @@ import { startHangup, stopHangup } from './ui/battle.js';
 import { startActivity, stopActivity, resumeActivityAfterLoad, showOfflineReport, pauseActivity } from './ui/idle.js';
 import { initDragDrop } from './ui/drag.js';
 import { toast } from './ui/dialog.js';
+import { checkAchievementsAndNotify, claimAchievementReward, renderAchievementPanel } from './ui/achievement.js';
 import {
     playerBreakthrough, triggerReborn, unequip,
     removeFromForge, executeForge, smeltByQuality, smeltAllItems,
@@ -85,6 +86,8 @@ function initGameCore() {
     renderProduction();
     renderWarehouse();
     rollShopGoods();
+    checkAchievementsAndNotify('all');
+    renderAchievementPanel();
     setInterval(saveGame, 5000);
     // 仅当离线确实够久(≥门槛)才弹「欢迎回来」；刷新/切后台的零碎时间产出照常结算但不打扰
     if (offlineReport && offlineReport.elapsedMs >= BALANCE.idle.offlineReportMinMs) showOfflineReport(offlineReport);
@@ -126,6 +129,7 @@ function onDelegatedClick(e) {
         case 'learn-all': learnAllSkills(); break;
         case 'buy-item': buyShopItem(Number(el.dataset.idx)); break;
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
+        case 'claim-achievement': if (claimAchievementReward(el.dataset.id)) { updatePlayerAttributes(); checkAchievementsAndNotify('coin'); saveGame(); } break;
         case 'use-bag': hideTooltip(); useBagItem(Number(el.dataset.idx)); break;
         case 'guide-jump': { const t = document.getElementById(el.dataset.target); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); break; }
         case 'export-save': exportSaveFile(); break;
