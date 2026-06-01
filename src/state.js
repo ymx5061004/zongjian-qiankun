@@ -24,11 +24,18 @@ export function makeDefaultPlayer() {
         // —— 新手指引任务链（江湖指引）——
         // completed: 已达成任务 id；claimed: 已领奖 id；activeId: 当前推荐任务（由 domain.syncQuestProgress 计算）；
         // stats: 无法从其他状态派生、需累计的计数器（其余进度尽量从既有状态派生，见 domain.getQuestProgress）。
-        quests: { completed: [], claimed: [], activeId: null, stats: { battleCount: 0, breakthroughCount: 0, shopVisitCount: 0 } },
+        quests: { completed: [], claimed: [], activeId: null, stats: { battleCount: 0, breakthroughCount: 0, shopVisitCount: 0, affixStageWins: 0 } },
+        // —— 修行流派 —— 未择道时为 null（保持原始数值，不施加任何加成/代价）。
+        cultivationPath: null,   // 当前流派 id（见 config.CULTIVATION_PATHS）
+        pathSelectedAt: 0,       // 首次/最近一次择道时间戳（Date.now()，仅记录）
+        pathSwitchCount: 0,      // 改换门庭次数（首次免费不计；用于切换花费几何递增）
         totalKills: 0,
         totalCoinEarned: 0,
         totalForgeCount: 0,
-        maxMapCleared: 0
+        maxMapCleared: 0,
+        // —— 地图词缀成就计数 —— 在特定词缀关卡建功（逆雷而行 / 剑冢寻锋）。
+        thunderWins: 0,          // 在「雷泽」词缀关卡的获胜次数
+        swordTombWeapons: 0      // 在「剑冢」词缀关卡夺得的兵刃件数
     };
 }
 

@@ -120,6 +120,9 @@ export const ACHIEVEMENTS = [
     { id: 'kill_100', category: 'battle', name: '斩妖除魔', desc: '击败100个敌人', target: 100, metric: 'totalKills', reward: { coin: 50000 } },
     { id: 'kill_1000', category: 'battle', name: '杀戮之王', desc: '击败1000个敌人', target: 1000, metric: 'totalKills', reward: { coin: 300000 } },
     { id: 'kill_10000', category: 'battle', name: '末世屠神', desc: '击败10000个敌人', target: 10000, metric: 'totalKills', reward: { coin: 2000000 } },
+    // —— 地图词缀成就（在特定词缀关卡建功）——
+    { id: 'thunder_10', category: 'battle', name: '逆雷而行', desc: '在「雷泽」词缀关卡获胜10次', target: 10, metric: 'thunderWins', reward: { coin: 100000 } },
+    { id: 'swordtomb_weapon', category: 'battle', name: '剑冢寻锋', desc: '在「剑冢」词缀关卡夺得一件兵刃', target: 1, metric: 'swordTombWeapons', reward: { coin: 60000 } },
 
     // 装备成就
     { id: 'equip_2_legendary', category: 'equip', name: '初得传说', desc: '装备2件神话品质装备', target: 2, metric: 'equippedLegendary', reward: { coin: 120000 } },
@@ -267,6 +270,29 @@ export const BALANCE = {
         max: 120,                 // 扩容上限
         priceStart: 2000,         // 第1次扩容(16→17)价(文)
         priceGrowth: 1.08         // 每多扩1格单价 ×1.08（首格2000→末格约554万，全程约7480万）
+    },
+
+    // —— 修行流派切换花费（首次择道免费；之后改换门庭按已切换次数几何递增碎银，抑制频繁反复横跳）——
+    // 第 n 次切换(n=pathSwitchCount, 从0计) = round(switchCoinBase * switchCoinGrowth^n / 1000)*1000。
+    path: { switchCoinBase: 80000, switchCoinGrowth: 1.8 },
+
+    // —— 地图词缀（关卡特性）旋钮：分配节奏 + 各效果硬上限（确定性·可解释·不爆经济/不秒杀）——
+    // 分配：前 earlySafeStages 关恒为荒原；非 milestoneEvery 倍数关为荒原；倍数关按非默认词缀顺序轮转；
+    //       eliteEvery 倍数关为「精英」(词缀强度 ×eliteIntensity，各效果仍各自封顶)。详见 domain.getMapModifier。
+    // 所有数值上限集中在此，调平衡只动这里。
+    mapMod: {
+        earlySafeStages: 3,            // 前 N 关恒为荒原（新手友好，不上惩罚词缀）
+        milestoneEvery: 5,             // 每 N 关出现一个明显词缀（其余关为荒原·均衡）
+        eliteEvery: 10,                // 每 N 关为「精英关」（词缀强化 + UI 提示）
+        eliteIntensity: 1.5,           // 精英关词缀强度倍率（作用于环境伤害/敌暴击/掉率加成，再各自封顶）
+        envDmgPctCap: 5,               // 单回合环境伤害上限（占气血上限 %）——绝不秒杀
+        dodgeReductionCap: 25,         // 闪避削减上限（百分点）
+        enemyCritCap: 60,              // 敌方暴击率上限（%）
+        healMultFloor: 0.2,            // 回血/吸血最低保留比例（魔窟）
+        expMultCap: 1.6,               // 修为加成上限（灵脉）
+        gearDropMultRange: [0.5, 1.6], // 装备掉率乘区允许范围
+        herbDropChanceCap: 0.35,       // 药材掉落概率上限（毒瘴）
+        skillDropChanceCap: 0.1        // 秘籍掉落概率上限（魔窟）
     }
 };
 
@@ -423,12 +449,127 @@ export const GUIDE_QUESTS = [
     { id: 'q_equip',        order: 2,  type: 'equipItem',    target: 1,  title: '夺得兵刃', desc: '在「行囊与洪炉」点击一件装备并【披挂上身】。',             reward: { coins: 3000, material: { ingot_copper: 4 } },     page: 'bag',       unlockHint: '行囊与洪炉 → 点背包里的装备 → 披挂上身',           next: 'q_map3' },
     { id: 'q_map3',         order: 3,  type: 'clearMap',     target: 3,  title: '小试锋芒', desc: '一路挂机征战，通关到第 3 关。',                           reward: { coins: 3000, exp: 800 },                          page: 'adventure', unlockHint: '百关征途 → 挂机推进到第 3 关',                     next: 'q_forge' },
     { id: 'q_forge',        order: 4,  type: 'forgeCount',   target: 1,  title: '天地洪炉', desc: '把两件物品投入「天地洪炉」融合 1 次。',                   reward: { coins: 5000 },                                    page: 'bag',       unlockHint: '行囊与洪炉 → 拖两件物品入炉 → 点【融合】',         next: 'q_breakthrough' },
-    { id: 'q_breakthrough', order: 5,  type: 'breakthrough', target: 1,  title: '内息初成', desc: '在「修真命格」完成 1 次破境冲关（境界 +1）。',             reward: { exp: 1500 },                                      page: 'role',      unlockHint: '修真命格 → 破境冲关（需消耗修为）',               next: 'q_skill' },
-    { id: 'q_skill',        order: 6,  type: 'ownSkill',     target: 2,  title: '百修入门', desc: '除初始拳法外，再参悟或购买并学会 1 本秘籍。',             reward: { coins: 6000, exp: 1000 },                         page: 'kungfu',    unlockHint: '珍宝黑市买秘籍 → 行囊参悟，或「百修秘籍」一键参悟', next: 'q_shop' },
-    { id: 'q_shop',         order: 7,  type: 'visitShop',    target: 1,  title: '黑市问价', desc: '进入或刷新一次「珍宝黑市」，看看有什么好货。',           reward: { coins: 5000 },                                    page: 'shop',      unlockHint: '左侧菜单 → 珍宝黑市',                             next: 'q_mine' },
-    { id: 'q_mine',         order: 8,  type: 'startMining',  target: 1,  title: '采矿试炼', desc: '到「采矿」开采矿石，或在战斗中拾得任意矿石。',           reward: { material: { ore_copper: 10 } },                   page: 'mining',    unlockHint: '生产经营 → 采矿 → 开采铜矿【开始】',              next: 'q_pill' },
-    { id: 'q_pill',         order: 9,  type: 'getPill',      target: 1,  title: '炼药初识', desc: '采药并在「炼丹」炼出一炉丹药（或服用任意丹药）。',         reward: { statBonus: { hp: 50 } },                          page: 'alchemy',   unlockHint: '生产经营 → 采药 → 炼丹 → 丹房服用',              next: 'q_map10' },
-    { id: 'q_map10',        order: 10, type: 'clearMap',     target: 10, title: '斩妖问道', desc: '战力渐长，通关到第 10 关（亦可去秘境击败 Boss）。',       reward: { coins: 20000, exp: 3000 },                        page: 'adventure', unlockHint: '百关征途 → 推进到第 10 关；秘境可挑战 Boss',       next: 'q_five' },
-    { id: 'q_five',         order: 11, type: 'questsDone',   target: 5,  title: '一日小成', desc: '累计达成 5 个新手指引任务。',                             reward: { coins: 30000, statBonus: { atk: 8, def: 6 } },    page: 'quest',     unlockHint: '继续完成上面的指引任务即可',                       next: 'q_reborn' },
-    { id: 'q_reborn',       order: 12, type: 'learnReborn',  target: 1,  title: '百世伏笔', desc: '了解「渡劫轮回」：境界达 20 级即可渡劫，重置境界换取全属性永久质变（不必现在就轮回）。', reward: { coins: 50000, exp: 10000 }, page: 'role', unlockHint: '修真命格 → 渡劫轮回（境界 ≥ 20 解锁）', next: null }
+    { id: 'q_breakthrough', order: 5,  type: 'breakthrough', target: 1,  title: '内息初成', desc: '在「修真命格」完成 1 次破境冲关（境界 +1）。',             reward: { exp: 1500 },                                      page: 'role',      unlockHint: '修真命格 → 破境冲关（需消耗修为）',               next: 'q_path' },
+    { id: 'q_path',         order: 6,  type: 'choosePath',   target: 1,  title: '择道而行', desc: '在「修行流派」选择一门流派，确立你的长远成长方向。',         reward: { coins: 8000, exp: 1000 },                         page: 'path',      unlockHint: '左侧菜单 → 修行流派 → 选择一门流派（首次免费）',     next: 'q_skill' },
+    { id: 'q_skill',        order: 7,  type: 'ownSkill',     target: 2,  title: '百修入门', desc: '除初始拳法外，再参悟或购买并学会 1 本秘籍。',             reward: { coins: 6000, exp: 1000 },                         page: 'kungfu',    unlockHint: '珍宝黑市买秘籍 → 行囊参悟，或「百修秘籍」一键参悟', next: 'q_shop' },
+    { id: 'q_shop',         order: 8,  type: 'visitShop',    target: 1,  title: '黑市问价', desc: '进入或刷新一次「珍宝黑市」，看看有什么好货。',           reward: { coins: 5000 },                                    page: 'shop',      unlockHint: '左侧菜单 → 珍宝黑市',                             next: 'q_mine' },
+    { id: 'q_mine',         order: 9,  type: 'startMining',  target: 1,  title: '采矿试炼', desc: '到「采矿」开采矿石，或在战斗中拾得任意矿石。',           reward: { material: { ore_copper: 10 } },                   page: 'mining',    unlockHint: '生产经营 → 采矿 → 开采铜矿【开始】',              next: 'q_pill' },
+    { id: 'q_pill',         order: 10, type: 'getPill',      target: 1,  title: '炼药初识', desc: '采药并在「炼丹」炼出一炉丹药（或服用任意丹药）。',         reward: { statBonus: { hp: 50 } },                          page: 'alchemy',   unlockHint: '生产经营 → 采药 → 炼丹 → 丹房服用',              next: 'q_map10' },
+    { id: 'q_map10',        order: 11, type: 'clearMap',     target: 10, title: '斩妖问道', desc: '战力渐长，通关到第 10 关（亦可去秘境击败 Boss）。',       reward: { coins: 20000, exp: 3000 },                        page: 'adventure', unlockHint: '百关征途 → 推进到第 10 关；秘境可挑战 Boss',       next: 'q_dixing' },
+    { id: 'q_dixing',       order: 12, type: 'clearAffixStage', target: 1, title: '识地势', desc: '通关一处带「地势词缀」的关卡（每 5 关起便有词缀，留意地图上的地势标识）。', reward: { coins: 10000, exp: 1500 },       page: 'adventure', unlockHint: '百关征途 → 挑战第 5 关及以上的词缀关卡并取胜',     next: 'q_five' },
+    { id: 'q_five',         order: 13, type: 'questsDone',   target: 5,  title: '一日小成', desc: '累计达成 5 个新手指引任务。',                             reward: { coins: 30000, statBonus: { atk: 8, def: 6 } },    page: 'quest',     unlockHint: '继续完成上面的指引任务即可',                       next: 'q_reborn' },
+    { id: 'q_reborn',       order: 14, type: 'learnReborn',  target: 1,  title: '百世伏笔', desc: '了解「渡劫轮回」：境界达 20 级即可渡劫，重置境界换取全属性永久质变（不必现在就轮回）。', reward: { coins: 50000, exp: 10000 }, page: 'role', unlockHint: '修真命格 → 渡劫轮回（境界 ≥ 20 解锁）', next: null }
+];
+
+// ============================================================
+// 修行流派（修行流派系统）：给玩家明确的长期成长分支——同样的装备/秘籍/战斗，
+// 因「道」不同而走向高攻爆发 / 厚血坚守 / 持毒磨敌 / 灵巧闪避 / 以器养道等不同风格。
+// 轻量·清晰·可扩展：不做复杂天赋树，一派 = 一组「加成 + 代价」数值（mods），由 domain 集中接入。
+//   id/name/desc/tags/unlockRealmLevel/recommendedStats/flavorText：展示用；
+//   bonuses/penalties：卡片展示的中文条目（与 mods 数值一一对应，便于武侠化措辞）；
+//   mods：引擎实际读取的数值（domain.pathModifiers 归一化后用于 computeStats / simulateBattle）：
+//     mult:  作用于 气血/攻击/防御 的「百分比乘区」(整数%，可负)；
+//     flat:  固定值加成——crit/dodge 为「百分点」；critDmg/thornsPct/openerBonus… 为战斗词条点数；
+//     gearStatMult:  装备「基础属性(攻/防/血)」贡献额外 +X%（器修）；
+//     subweaponMult: 暗器(subweapon)贡献额外 +X%（毒修）；
+//     enhanceMult:   强化收益额外 +X%（器修，放大 enhance 倍率）；
+//     skillMult:     被动秘籍五维收益 +X%（器修为负，作代价）；
+//     craftQualityBonus: 打造时高成色概率小幅提升的开关(≥1)（器修）；
+//     poison: { chance(每次出手中毒概率%), pctOfAtk(每层每回合伤害=攻击×%), maxStacks(层数上限), bossEff(对Boss效率系数) }（毒修）。
+// 数值平衡集中在此与 BALANCE.path——调手感只动这里，逻辑零散落。
+// ============================================================
+export const CULTIVATION_PATHS = [
+    {
+        id: 'sword', name: '剑宗·剑修', tags: ['攻击', '暴击', '爆发'], unlockRealmLevel: 1,
+        desc: '以剑入道，求一击破敌。攻势凌厉、暴起伤人，然守御稍疏。',
+        recommendedStats: '攻击 · 暴击 · 暴击伤害',
+        flavorText: '剑者，凶器也；一寸短一寸险，一剑快，天下惊。',
+        bonuses: ['攻击 +8%', '暴击率 +3%', '暴击伤害 +10%'],
+        penalties: ['防御 -5%'],
+        mods: { mult: { atk: 8, def: -5 }, flat: { crit: 3, critDmg: 10 } }
+    },
+    {
+        id: 'body', name: '金身·体修', tags: ['气血', '防御', '坚毅'], unlockRealmLevel: 1,
+        desc: '淬炼肉身如金似铁，血厚甲坚，最宜稳扎稳打、长久挂机；受击之际更有反震之力。',
+        recommendedStats: '气血 · 防御 · 反震',
+        flavorText: '千锤百炼此身躯，刀枪难入鬼神惊。',
+        bonuses: ['气血 +12%', '防御 +10%', '反震：受击反弹攻击 15%'],
+        penalties: ['闪避 -3%'],
+        mods: { mult: { hp: 12, def: 10 }, flat: { dodge: -3, thornsPct: 15 } }
+    },
+    {
+        id: 'poison', name: '毒龙·毒修', tags: ['暗器', '持续', '磨炼'], unlockRealmLevel: 5,
+        desc: '御毒驭虫，伤敌于无形。暗器淬毒，出手有概率使敌中毒、逐回合灼烧；然正面拼杀稍逊。',
+        recommendedStats: '攻击 · 暗器 · 持久',
+        flavorText: '见血封喉，附骨之蛆——磨死强敌，何须一击。',
+        bonuses: ['暗器伤害 +20%', '出手 30% 概率附「淬毒」', '中毒每层每回合 = 攻击 10%（可叠 4 层 · 真伤无视防御）'],
+        penalties: ['正面攻击 -4%'],
+        mods: { mult: { atk: -4 }, subweaponMult: 20, poison: { chance: 30, pctOfAtk: 10, maxStacks: 4, bossEff: 0.4 } }
+    },
+    {
+        id: 'agility', name: '踏雪·身法', tags: ['闪避', '先手', '灵巧'], unlockRealmLevel: 1,
+        desc: '身轻如燕，来去如风。善避锋芒、抢占先机，开场数招气势如虹；唯体魄略薄。',
+        recommendedStats: '闪避 · 先手 · 灵巧',
+        flavorText: '踏雪无痕，迎风一笑——敌未近身，我已三剑。',
+        bonuses: ['闪避 +5%', '先发制人：前 2 回合增伤 +20%'],
+        penalties: ['气血 -8%'],
+        mods: { mult: { hp: -8 }, flat: { dodge: 5, openerBonus: 20 } }
+    },
+    {
+        id: 'artisan', name: '百炼·器修', tags: ['装备', '强化', '打造'], unlockRealmLevel: 8,
+        desc: '痴于器物，以兵养道。装备根骨更盛、强化所得更丰、打造易出好货；然钻研武学之心稍分。',
+        recommendedStats: '装备 · 强化 · 打造',
+        flavorText: '人养兵三年，兵助人一世——神兵在手，胜过十年苦功。',
+        bonuses: ['装备基础属性 +5%', '强化收益 +8%', '打造更易出高成色'],
+        penalties: ['秘籍（被动功法）收益 -5%'],
+        mods: { gearStatMult: 5, enhanceMult: 8, craftQualityBonus: 1, skillMult: -5 }
+    }
+];
+
+// ============================================================
+// 地图词缀（关卡特性）：让不同关卡有不同战斗环境与掉落倾向，而非纯数值翻倍。
+// 确定性·可解释·UI 可见（按关卡号分配，刷新不变；见 domain.getMapModifier）。轻量配置化，加词缀只往此处加一条。
+//   id/name/desc/icon/tone：展示（tone 引用既有 CSS 变量，不硬编码颜色）；
+//   unlockFromMapLevel：该词缀最早可在第几关出现（早关回落荒原，配速更温和）；
+//   preferredPaths：契合的修行流派 id（仅信息展示 + 个别机制联动，如毒修抗毒瘴）；
+//   combat：战斗环境（由 domain.resolveMapEnv 解析、各项封顶后喂给 simulateBattle）——
+//     enemyCritChance/enemyCritMult（敌暴击）、dodgeReduction（玩家闪避削减·百分点）、
+//     healMult（玩家回血/吸血乘区<1）、envDmgPctMaxHp（每回合环境真伤=气血上限%）、
+//     envLabel（环境伤害日志文案）、resistPath+resistFactor（对应流派减伤，如毒修抗毒瘴）；
+//   reward：掉落/收益倾向（由 domain.getMapRewardMods 解析、全部封顶）——
+//     expMult（修为加成）、gearDropMult（装备掉率乘区）、weaponBias（兵刃/暗器掉落偏向概率）、
+//     herbDropChance（药材掉落概率）、skillDropChance（秘籍掉落概率）。
+// ============================================================
+export const MAP_MODIFIERS = [
+    {
+        id: 'wildland', name: '荒原', icon: '🌾', tone: 'var(--text-muted)', unlockFromMapLevel: 1,
+        desc: '天地平和，无特殊凶险，亦无额外造化。', preferredPaths: [],
+        combat: {}, reward: {}
+    },
+    {
+        id: 'spirit_vein', name: '灵脉', icon: '🌀', tone: 'var(--color-success)', unlockFromMapLevel: 5,
+        desc: '地脉灵气充盈，修行事半功倍；然宝物罕现，装备掉落偏少。', preferredPaths: [],
+        combat: {}, reward: { expMult: 1.3, gearDropMult: 0.7 }
+    },
+    {
+        id: 'sword_tomb', name: '剑冢', icon: '🗡️', tone: 'var(--color-orange)', unlockFromMapLevel: 5,
+        desc: '万剑长眠，杀机森寒——守卫出手暴起伤人，却也最易遗落兵刃。', preferredPaths: ['sword'],
+        combat: { enemyCritChance: 25, enemyCritMult: 1.6 }, reward: { weaponBias: 0.7 }
+    },
+    {
+        id: 'poison_mist', name: '毒瘴', icon: '☠️', tone: 'var(--color-accent)', unlockFromMapLevel: 10,
+        desc: '瘴气弥漫，逐回合侵蚀气血；草药却也丰茂。毒修于此如鱼得水，所受侵蚀大减。', preferredPaths: ['poison'],
+        combat: { envDmgPctMaxHp: 3, envLabel: '毒瘴侵体', resistPath: 'poison', resistFactor: 0.4 },
+        reward: { herbDropChance: 0.25 }
+    },
+    {
+        id: 'demon_den', name: '魔窟', icon: '👹', tone: 'var(--color-honghuang)', unlockFromMapLevel: 15,
+        desc: '魔煞蚀身，回血与吸血大打折扣；然魔头藏有武学秘传，偶有秘籍遗落。', preferredPaths: [],
+        combat: { healMult: 0.4 }, reward: { skillDropChance: 0.05 }
+    },
+    {
+        id: 'thunder_marsh', name: '雷泽', icon: '⚡', tone: 'var(--color-blue)', unlockFromMapLevel: 20,
+        desc: '雷霆过境，身形难展（闪避大降），且逐回合雷击灼身——唯血厚甲坚者可镇之。', preferredPaths: ['body'],
+        combat: { dodgeReduction: 10, envDmgPctMaxHp: 2, envLabel: '雷光过境' }, reward: {}
+    }
 ];

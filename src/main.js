@@ -24,7 +24,7 @@ import {
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
     enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
     exportSaveFile, importSaveFile, buyBagSlot, takePill,
-    claimGuideQuestReward, recordShopVisit
+    claimGuideQuestReward, recordShopVisit, selectCultivationPath
 } from './actions.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
@@ -132,6 +132,7 @@ function onDelegatedClick(e) {
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
         case 'claim-achievement': if (claimAchievementReward(el.dataset.id)) { updatePlayerAttributes(); checkAchievementsAndNotify('coin'); saveGame(); } break;
         case 'claim-quest': claimGuideQuestReward(el.dataset.id); break;
+        case 'select-path': selectCultivationPath(el.dataset.path); break;
         case 'use-bag': hideTooltip(); useBagItem(Number(el.dataset.idx)); break;
         case 'guide-jump': { const t = document.getElementById(el.dataset.target); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); break; }
         case 'export-save': exportSaveFile(); break;

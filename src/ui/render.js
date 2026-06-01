@@ -3,9 +3,9 @@
 // 含：属性面板 / 各列表 / 洪炉 / 背包 / 技能 / 切页 / 浮动提示(tooltip)。
 // 交互一律走 data-act 属性 + main.js 的事件委托，HTML 里不再有 onclick。
 // ============================================================
-import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS } from '../config.js';
+import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS, CULTIVATION_PATHS } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById } from '../domain.js';
 import { formatNumber } from '../util.js';
 import { renderAchievementPanel } from './achievement.js';
 
@@ -309,7 +309,13 @@ export function renderMapList() {
         card.className = `list-card`;
         if (!isUnlocked) card.style.opacity = "0.3";
         const recTier = GEAR_TIERS[mapTier(i) - 1];
-        card.innerHTML = `<div><strong>关卡 ${i}：${MAP_NAMES[i - 1] || `神秘禁区`}</strong> ${!isUnlocked ? '🔒' : ''}<br><small style="color:var(--text-muted)">准入: ${getRealmName(reqLevel)} · 推荐 <span style="color:var(--color-blue)">${recTier.name}套</span> · 掉 ${recTier.name}矿</small></div><button class="btn" ${isUnlocked ? '' : 'disabled'} data-act="hangup" data-map="${i}">${player.currentMapId === i ? '历练中' : '挑战'}</button>`;
+        // 地图词缀（确定性，刷新不变）：荒原不显示；其余显示 图标+名称(+精英) 与 描述/推荐流派。
+        const { mod, isElite } = getMapModifier(i);
+        const isDefaultMod = mod.id === 'wildland';
+        const modLabel = isDefaultMod ? '' : ` · <span style="color:${mod.tone};">${mod.icon}${mod.name}${isElite ? '·精英' : ''}</span>`;
+        const prefPaths = (mod.preferredPaths || []).map(pid => { const p = getPathById(pid); return p ? p.name : pid; }).join('/');
+        const modDesc = isDefaultMod ? '' : `<br><small style="color:${mod.tone};opacity:0.85;">${mod.icon} ${mod.desc}${prefPaths ? `（宜：${prefPaths}）` : ''}</small>`;
+        card.innerHTML = `<div><strong>关卡 ${i}：${MAP_NAMES[i - 1] || `神秘禁区`}</strong> ${!isUnlocked ? '🔒' : ''}<br><small style="color:var(--text-muted)">准入: ${getRealmName(reqLevel)} · 推荐 <span style="color:var(--color-blue)">${recTier.name}套</span> · 掉 ${recTier.name}矿${modLabel}</small>${modDesc}</div><button class="btn" ${isUnlocked ? '' : 'disabled'} data-act="hangup" data-map="${i}">${player.currentMapId === i ? '历练中' : '挑战'}</button>`;
         box.appendChild(card);
     }
 }
@@ -755,6 +761,7 @@ export function switchPage(pageId, tabEl) {
     else if (tabEl && tabEl.classList.contains('menu-item')) tabEl.classList.add('active');
     closeMenu();   // 移动端：点菜单项后收起抽屉
     if (pageId === 'quest') renderQuestPanel();
+    if (pageId === 'path') renderPathPage();
     if (pageId === 'role' || pageId === 'bag') updatePlayerAttributes();
     if (pageId === 'kungfu') renderPlayerSkills();
     if (pageId === 'shop') { renderBagExpand(); renderShopGoods(); }
@@ -865,6 +872,55 @@ export function renderQuestPanel() {
     }).join('');
 
     box.innerHTML = html;
+}
+
+// ---------- 修行流派：当前流派 + 5 派卡片（定位/加成/代价/解锁/择道·改修）----------
+// 数值与文案来自 config.CULTIVATION_PATHS；加成/代价由 bonuses/penalties 直接展示（与 mods 一一对应）。
+export function renderPathPage() {
+    const box = document.getElementById('path-content');
+    if (!box) return;
+    const player = state.player;
+    const active = getActivePath(player);
+    const switchInfo = pathSwitchCost(player); // null = 首次免费
+
+    const chip = t => `<span style="display:inline-block;font-size:11px;color:var(--color-blue);border:1px solid #2c3a4a;border-radius:10px;padding:1px 8px;margin-right:4px;">${t}</span>`;
+
+    const head = active
+        ? `<div class="list-card" style="flex-direction:column;align-items:flex-start;gap:6px;border-color:rgba(46,204,113,0.35);background:rgba(46,204,113,0.06);">
+               <div><span style="color:var(--color-success);font-weight:bold;">当前流派：</span><b style="color:var(--color-gold);font-size:15px;">${active.name}</b>　<span style="font-size:11px;color:var(--text-muted);">已改换 ${player.pathSwitchCount || 0} 次</span></div>
+               <div style="font-size:12px;color:#aaa;font-style:italic;">「${active.flavorText}」</div>
+           </div>`
+        : `<div class="list-card" style="justify-content:center;color:var(--text-muted);">尚未择道——选择一门流派，确立你的成长方向（<b style="color:var(--color-gold)">首次免费</b>）。</div>`;
+
+    const cards = CULTIVATION_PATHS.map(p => {
+        const isCurrent = player.cultivationPath === p.id;
+        const unlocked = isPathUnlocked(player, p);
+        const bonusHtml = (p.bonuses || []).map(b => `<li style="color:var(--color-success);">▲ ${b}</li>`).join('');
+        const penaltyHtml = (p.penalties || []).map(b => `<li style="color:var(--color-accent);">▼ ${b}</li>`).join('');
+        const tags = (p.tags || []).map(chip).join('');
+
+        let btn;
+        if (isCurrent) btn = `<button class="btn" disabled>✦ 当前流派</button>`;
+        else if (!unlocked) btn = `<button class="btn" disabled>🔒 需${getRealmName(p.unlockRealmLevel)}</button>`;
+        else if (!switchInfo) btn = `<button class="btn btn-success" data-act="select-path" data-path="${p.id}">免费择道</button>`;
+        else {
+            const afford = player.coin >= switchInfo.coin;
+            btn = `<button class="btn ${afford ? 'btn-success' : ''}" data-act="select-path" data-path="${p.id}"${afford ? '' : ' disabled'}>改修 (${formatNumber(switchInfo.coin)}文)</button>`;
+        }
+
+        return `<div class="act-card ${isCurrent ? 'running' : ''} ${unlocked ? '' : 'locked'}" style="margin-bottom:10px;">
+            <div class="act-head"><span class="act-title">${isCurrent ? '✦ ' : ''}${p.name}</span>${btn}</div>
+            <div style="margin:4px 0 6px;">${tags}</div>
+            <div class="act-meta" style="font-size:12px;color:#bbb;">${p.desc}</div>
+            <ul style="margin:8px 0 4px;padding-left:18px;line-height:1.8;font-size:12px;">${bonusHtml}${penaltyHtml}</ul>
+            <div class="act-meta">📌 推荐养成：${p.recommendedStats}　·　解锁：${p.unlockRealmLevel <= 1 ? '开局即可' : getRealmName(p.unlockRealmLevel)}</div>
+            <div class="act-meta" style="color:#777;font-style:italic;">「${p.flavorText}」</div>
+        </div>`;
+    }).join('');
+
+    box.innerHTML = head +
+        `<div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin:12px 0 8px;">首次择道免费；之后改换门庭按已切换次数递增碎银（确认后扣费，属性即时更替）。流派加成与代价已计入面板战力。</div>` +
+        cards;
 }
 
 // ---------- 江湖秘典：游戏全机制说明（只读静态页）----------

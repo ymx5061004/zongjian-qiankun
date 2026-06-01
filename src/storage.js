@@ -9,7 +9,7 @@ import { SKILL_SUFFIXES, GEAR_SLOTS, PROFESSIONS } from './config.js';
 import { syncQuestProgress } from './domain.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
-const SAVE_VERSION = 4;                 // v4: 新增 quests(新手指引任务链)；补全逻辑在 normalizePlayer，旧档不炸
+const SAVE_VERSION = 6;                 // v4: quests(新手指引)；v5: cultivationPath(修行流派)；v6: 地图词缀计数。补全在 normalizePlayer，旧档不炸
 
 export function saveGame() {
     if (!state.player.name) return;
@@ -64,6 +64,7 @@ export function normalizePlayer(parsed) {
     if (!Number.isFinite(qs.battleCount) || qs.battleCount < 0) qs.battleCount = 0;
     if (!Number.isFinite(qs.breakthroughCount) || qs.breakthroughCount < 0) qs.breakthroughCount = 0;
     if (!Number.isFinite(qs.shopVisitCount) || qs.shopVisitCount < 0) qs.shopVisitCount = 0;
+    if (!Number.isFinite(qs.affixStageWins) || qs.affixStageWins < 0) qs.affixStageWins = 0; // v6: 词缀关卡获胜计数（识地势指引）
     // 旧档首次引入 quests：用既有进度回种「无法从其他状态派生」的计数器，
     // 让早已满足条件的任务直接显示「可领取」而非从零开始（不让旧玩家卡死）。
     if (!hadQuests) {
@@ -72,6 +73,13 @@ export function normalizePlayer(parsed) {
     }
     // 静默基线同步：填好 completed[] 与 activeId（不弹提示），避免旧档首个动作触发「一次性补发」的提示风暴。
     syncQuestProgress(player);
+    // —— 修行流派字段补全（v5 新增）：旧档无 path 字段 → 默认未择道(null)，保持原始数值、不强制选择 ——
+    if (p.cultivationPath === undefined) p.cultivationPath = null;
+    if (!Number.isFinite(p.pathSelectedAt) || p.pathSelectedAt < 0) p.pathSelectedAt = 0;
+    if (!Number.isFinite(p.pathSwitchCount) || p.pathSwitchCount < 0) p.pathSwitchCount = 0;
+    // —— 地图词缀成就计数补全（v6 新增）——
+    if (!Number.isFinite(p.thunderWins) || p.thunderWins < 0) p.thunderWins = 0;
+    if (!Number.isFinite(p.swordTombWeapons) || p.swordTombWeapons < 0) p.swordTombWeapons = 0;
     return player;
 }
 

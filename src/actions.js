@@ -4,12 +4,12 @@
 // ============================================================
 import { state } from './state.js';
 import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES, GEAR_SLOTS } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix } from './domain.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
     rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse, renderBagExpand, renderPills,
-    renderQuestPanel, fmtQuestReward
+    renderQuestPanel, fmtQuestReward, renderPathPage
 } from './ui/render.js';
 import { saveGame, exportSaveString, importSaveString } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -87,6 +87,40 @@ export function claimGuideQuestReward(questId) {
     updatePlayerAttributes();  // 碎银/修为/永久根骨(statBonus)反映到面板与顶栏
     saveGame();
     toast(`🎁 领取成功：${fmtQuestReward(reward)}`, 'success');
+}
+
+// ============================================================
+// 修行流派：择道 / 改换门庭（异步确认）。首次免费；之后耗碎银（几何递增）。切后即时重算属性并存档。
+// ============================================================
+export async function selectCultivationPath(pathId) {
+    const player = state.player;
+    const path = getPathById(pathId);
+    if (!path) return;
+    if (player.cultivationPath === pathId) { toast(`你已身在「${path.name}」之道。`, 'error'); return; }
+    if (player.realmLevel < path.unlockRealmLevel) { toast(`境界未至，「${path.name}」需 ${getRealmName(path.unlockRealmLevel)} 方可修习。`, 'error'); return; }
+
+    const isFirst = !player.cultivationPath;
+    if (!isFirst) {
+        const cost = pathSwitchCost(player);
+        if (player.coin < cost.coin) { toast(`改换门庭需碎银 ${formatNumber(cost.coin)} 文，碎银不足。`, 'error'); return; }
+        const ok = await confirmDialog(
+            `确定改修「<b style="color:var(--color-gold)">${path.name}</b>」？<br>需耗碎银 <b style="color:var(--color-accent)">${formatNumber(cost.coin)}</b> 文，原流派加成将立即更替。`,
+            '改换门庭'
+        );
+        if (!ok) return;
+        // 异步确认期间状态可能变动，二次校验，避免重复扣费/越权
+        if (player.cultivationPath === pathId) return;
+        if (player.coin < cost.coin) { toast('碎银不足。', 'error'); return; }
+        player.coin -= cost.coin;
+        player.pathSwitchCount = (player.pathSwitchCount || 0) + 1;
+    }
+    player.cultivationPath = pathId;
+    player.pathSelectedAt = Date.now();
+    renderPathPage();
+    updatePlayerAttributes();    // 流派加成即时反映到属性面板/战力与顶栏碎银
+    maybeUpdateQuestProgress();  // 指引「择道而行」
+    saveGame();
+    toast(isFirst ? `✨ 你已踏上「${path.name}」之道！` : `🔁 已改修「${path.name}」，气象一新。`, 'success');
 }
 
 // —— 破境冲关 ——
@@ -465,7 +499,10 @@ export function craftGear(tier, slot) {
     player.materials[cost.ingotKey] -= cost.ingotQty;
     if (player.materials[cost.ingotKey] <= 0) delete player.materials[cost.ingotKey];
     player.coin -= cost.coin;
-    const q = rollQuality();
+    let q = rollQuality();
+    // 器修：打造更易出高成色（小幅 +1 成色概率；无派/非器修不触发）
+    const path = getActivePath(player);
+    if (path && path.mods && path.mods.craftQualityBonus && q < 5 && Math.random() < 0.25 * path.mods.craftQualityBonus) q++;
     const piece = makeGearPiece(tier, slot, q);
     player.bag.push(piece);
 

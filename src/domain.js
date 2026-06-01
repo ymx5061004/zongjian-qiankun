@@ -4,7 +4,7 @@
 // ============================================================
 import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
-    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS
+    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS, CULTIVATION_PATHS, MAP_MODIFIERS
 } from './config.js';
 const LEGENDARY_QUALITY = 5;
 
@@ -113,7 +113,7 @@ function ensureQuestState(player) {
     if (!Array.isArray(q.claimed)) q.claimed = [];
     if (q.activeId === undefined) q.activeId = null;
     if (!q.stats || typeof q.stats !== 'object') q.stats = {};
-    ['battleCount', 'breakthroughCount', 'shopVisitCount'].forEach(k => { if (!Number.isFinite(q.stats[k]) || q.stats[k] < 0) q.stats[k] = 0; });
+    ['battleCount', 'breakthroughCount', 'shopVisitCount', 'affixStageWins'].forEach(k => { if (!Number.isFinite(q.stats[k]) || q.stats[k] < 0) q.stats[k] = 0; });
 }
 
 export function getGuideQuestById(id) {
@@ -156,6 +156,8 @@ export function getQuestProgress(player, quest) {
         case 'startMining':  cur = (((player.professions && player.professions.mining && player.professions.mining.exp) || 0) > 0 || ownsAnyOre(player)) ? 1 : 0; break;
         case 'getPill':      cur = (((player.professions && player.professions.alchemy && player.professions.alchemy.exp) || 0) > 0 || ownsAnyPill(player) || pillBonusSum(player) > 0) ? 1 : 0; break;
         case 'questsDone':   cur = countCompletedGuideQuests(player, quest.id); break;                     // 已达成的其它任务数
+        case 'choosePath':   cur = player.cultivationPath ? 1 : 0; break;                                  // 已选择任意修行流派
+        case 'clearAffixStage': cur = s.affixStageWins || 0; break;                                        // 通关带词缀关卡的次数（计数器）
         case 'learnReborn':  cur = ((player.rebornCount || 0) >= 1 || (player.realmLevel || 1) >= BALANCE.reborn.minLevel) ? 1 : 0; break;
         default:             cur = 0;
     }
@@ -271,9 +273,51 @@ export function enhanceCost(item) {
     };
 }
 
+// ============================================================
+// 修行流派：取派 / 解锁判定 / 切换花费 / 数值归一化(mods)。纯逻辑——computeStats 与 simulateBattle 据此接入。
+// ============================================================
+export function getPathById(id) {
+    return CULTIVATION_PATHS.find(p => p.id === id) || null;
+}
+export function getActivePath(player) {
+    return player ? getPathById(player.cultivationPath) : null;
+}
+export function isPathUnlocked(player, path) {
+    return (player.realmLevel || 1) >= (path.unlockRealmLevel || 1);
+}
+// 下一次「改换门庭」的碎银花费（首次择道免费 → 返回 null）。已切换次数越多越贵（几何递增，取整到千）。
+export function pathSwitchCost(player) {
+    if (!player.cultivationPath) return null; // 首次择道免费
+    const P = BALANCE.path;
+    const n = Math.max(0, player.pathSwitchCount || 0);
+    const raw = P.switchCoinBase * Math.pow(P.switchCoinGrowth, n);
+    return { coin: Math.max(P.switchCoinBase, Math.round(raw / 1000) * 1000) };
+}
+// 把当前流派归一化成引擎可读数值（无派/缺字段 → 全零默认；computeStats/simulateBattle 据此恒等于「未择道」原行为）。
+export function pathModifiers(player) {
+    const def = { mult: {}, flat: {}, gearStatMult: 0, subweaponMult: 0, enhanceMult: 0, skillMult: 0, craftQualityBonus: 0, poison: null };
+    const path = getActivePath(player);
+    if (!path || !path.mods) return def;
+    const m = path.mods;
+    return {
+        mult: m.mult || {}, flat: m.flat || {},
+        gearStatMult: m.gearStatMult || 0, subweaponMult: m.subweaponMult || 0,
+        enhanceMult: m.enhanceMult || 0, skillMult: m.skillMult || 0,
+        craftQualityBonus: m.craftQualityBonus || 0, poison: m.poison || null
+    };
+}
+
 // —— 由 player 派生当前战斗属性。纯函数：返回 {stats, honghuangPower} ——
 export function computeStats(player) {
     const rebornMult = 1 + player.rebornCount * BALANCE.rebornMultPerCount;
+
+    // —— 修行流派数值（无派时全为零默认 → 下面各项恒等于原行为，旧档/未择道零影响）——
+    const M = pathModifiers(player);
+    const pm = M.mult, pf = M.flat;
+    const skillM = 1 + M.skillMult / 100;     // 器修代价：被动秘籍五维收益 ×(1+skillMult%)
+    const gearM = 1 + M.gearStatMult / 100;   // 器修：装备基础属性贡献 ×(1+gearStatMult%)
+    const subM = 1 + M.subweaponMult / 100;   // 毒修：暗器(subweapon)贡献 ×(1+subweaponMult%)
+    const enhBoost = 1 + M.enhanceMult / 100; // 器修：强化收益放大 ×(1+enhanceMult%)
 
     // 丹药永久增益(pillBonus)与基础值同层：攻防血吃轮回乘区(根骨厚→修炼放大)，暴击/闪避同 base 不乘
     const pill = player.pillBonus || {};
@@ -285,22 +329,25 @@ export function computeStats(player) {
 
     player.skills.forEach(sk => {
         if (sk.type === 'passive') {
-            if (sk.hp) calcHp += (sk.hp * sk.level);
-            if (sk.atk) calcAtk += (sk.atk * sk.level);
-            if (sk.def) calcDef += (sk.def * sk.level);
-            if (sk.dodge) calcDodge += (sk.dodge * sk.level);
-            if (sk.crit) calcCrit += (sk.crit * sk.level);
+            // 器修代价：被动秘籍五维收益 ×skillM（无派 skillM=1 → 原值）。攻防血取整保持整数。
+            if (sk.hp) calcHp += Math.floor(sk.hp * sk.level * skillM);
+            if (sk.atk) calcAtk += Math.floor(sk.atk * sk.level * skillM);
+            if (sk.def) calcDef += Math.floor(sk.def * sk.level * skillM);
+            if (sk.dodge) calcDodge += (sk.dodge * sk.level * skillM);
+            if (sk.crit) calcCrit += (sk.crit * sk.level * skillM);
         }
     });
 
     for (const slot in player.equips) {
         const eq = player.equips[slot];
         if (eq) {
-            // 强化(enhance)只放大攻/防/血等主属性，不碰暴击/闪避(%)，避免闪避被堆爆
-            const em = 1 + (eq.enhance || 0) * BALANCE.enhance.perLevel;
-            if (eq.atk) calcAtk += Math.floor(eq.atk * em);
-            if (eq.def) calcDef += Math.floor(eq.def * em);
-            if (eq.hp) calcHp += Math.floor(eq.hp * em);
+            // 强化(enhance)只放大攻/防/血等主属性，不碰暴击/闪避(%)，避免闪避被堆爆。
+            // 器修：enhBoost 放大强化收益、gearM 抬装备基础属性；毒修：暗器(subweapon)额外 ×subM。（无派均为 ×1，结果不变）
+            const em = 1 + (eq.enhance || 0) * BALANCE.enhance.perLevel * enhBoost;
+            const slotMult = gearM * (slot === 'subweapon' ? subM : 1);
+            if (eq.atk) calcAtk += Math.floor(eq.atk * em * slotMult);
+            if (eq.def) calcDef += Math.floor(eq.def * em * slotMult);
+            if (eq.hp) calcHp += Math.floor(eq.hp * em * slotMult);
             if (eq.crit) calcCrit += eq.crit;
             if (eq.dodge) calcDodge += eq.dodge;
         }
@@ -315,12 +362,19 @@ export function computeStats(player) {
     player.skills.forEach(sk => { if (sk.isHongHuang) honghuangPower = sk.level; });
     const hhMultiplier = 1 + (honghuangPower * BALANCE.honghuangMultPerLevel);
 
+    // 流派固定值：暴击/闪避「百分点」加成（与 pill/被动同层，pre-洪荒；无派为 0）。
+    calcCrit += pf.crit || 0;
+    calcDodge += pf.dodge || 0;
+
+    // 流派百分比乘区：五维均 ×(1+mult%)，与洪荒同层叠乘（无派/未配该项为 ×1，恒等于原行为）。
+    // 五维一致支持 mult（虽现有 5 派只对 暴击/闪避 用 flat 点数加成，但 mult.crit/mult.dodge 也生效，避免将来配置静默失效）。
+    // 暴击/闪避最终钳到 ≥0，防代价把数值压成负；闪避另有 dodgeCap 硬上限。
     const stats = {
-        hp: Math.floor(calcHp * hhMultiplier),
-        atk: Math.floor(calcAtk * hhMultiplier),
-        def: Math.floor(calcDef * hhMultiplier),
-        crit: parseFloat((calcCrit * hhMultiplier).toFixed(1)),
-        dodge: parseFloat(Math.min(BALANCE.dodgeCap, calcDodge * hhMultiplier).toFixed(1)),
+        hp: Math.floor(calcHp * hhMultiplier * (1 + (pm.hp || 0) / 100)),
+        atk: Math.floor(calcAtk * hhMultiplier * (1 + (pm.atk || 0) / 100)),
+        def: Math.floor(calcDef * hhMultiplier * (1 + (pm.def || 0) / 100)),
+        crit: parseFloat(Math.max(0, calcCrit * hhMultiplier * (1 + (pm.crit || 0) / 100)).toFixed(1)),
+        dodge: parseFloat(Math.max(0, Math.min(BALANCE.dodgeCap, calcDodge * hhMultiplier * (1 + (pm.dodge || 0) / 100))).toFixed(1)),
         dropRate: 100,
         coinRate: 100
     };
@@ -340,8 +394,72 @@ export function computeStats(player) {
             COMBAT_AFFIX_KEYS.forEach(k => { if (sk[k]) stats[k] += (sk[k] * sk.level); });
         }
     });
+    // 流派词条加成（剑修暴伤 critDmg / 体修反震 thornsPct / 身法先发 openerBonus 等）——叠加进对应词条池。
+    COMBAT_AFFIX_KEYS.forEach(k => { if (pf[k]) stats[k] += pf[k]; });
+    // 毒修：把中毒参数随属性带入战斗（无派/非毒修为 null → simulateBattle 不触发中毒、零影响）。
+    stats.poison = M.poison;
 
     return { stats, honghuangPower };
+}
+
+// ============================================================
+// 地图词缀（关卡特性）：分配 / 战斗环境解析 / 奖励修正。纯逻辑·确定性（按关卡号，无随机、无副作用）。
+// ============================================================
+const DEFAULT_MAP_MOD = MAP_MODIFIERS.find(m => m.id === 'wildland') || MAP_MODIFIERS[0];
+export function getMapModifierById(id) { return MAP_MODIFIERS.find(m => m.id === id) || null; }
+
+// 关卡词缀分配（确定性·可解释·配置化）：前 earlySafeStages 关与非里程碑关均为荒原；
+// 里程碑关（milestoneEvery 的倍数）按「非默认词缀顺序」轮转；未达 unlockFromMapLevel 则回落荒原（早关更温和）。
+// 里程碑里再每 eliteEvery 关为「精英」（词缀强度 ×eliteIntensity）。返回 { mod, intensity, isElite }。
+export function getMapModifier(mapLevel) {
+    const MM = BALANCE.mapMod;
+    const lv = Math.max(1, Math.floor(mapLevel || 1));
+    if (lv <= MM.earlySafeStages || lv % MM.milestoneEvery !== 0) return { mod: DEFAULT_MAP_MOD, intensity: 1, isElite: false };
+    const pool = MAP_MODIFIERS.filter(m => m.id !== DEFAULT_MAP_MOD.id);
+    let mod = pool.length ? pool[((lv / MM.milestoneEvery) - 1) % pool.length] : DEFAULT_MAP_MOD;
+    if (!mod || lv < (mod.unlockFromMapLevel || 1)) mod = DEFAULT_MAP_MOD; // 未解锁 → 回落荒原
+    const isElite = (lv % MM.eliteEvery === 0) && mod.id !== DEFAULT_MAP_MOD.id;
+    return { mod, intensity: isElite ? MM.eliteIntensity : 1, isElite };
+}
+
+// 把关卡词缀解析为 simulateBattle 可读的「战斗环境」对象（各项已按 BALANCE.mapMod 封顶；含流派抗性）。
+// 无战斗效果（荒原/灵脉/秘境）→ 返回 null，对战斗零影响。player 用于流派联动（如毒修抗毒瘴）。
+export function resolveMapEnv(mapLevel, player) {
+    const { mod, intensity } = getMapModifier(mapLevel);
+    const c = mod && mod.combat ? mod.combat : null;
+    if (!c) return null;
+    const MM = BALANCE.mapMod;
+    const path = player ? player.cultivationPath : null;
+    const env = { label: c.envLabel || mod.name, modName: mod.name };
+    let any = false;
+    if (c.enemyCritChance) { env.enemyCritChance = Math.min(MM.enemyCritCap, c.enemyCritChance * intensity); env.enemyCritMult = c.enemyCritMult || 1.5; any = true; }
+    if (c.dodgeReduction) { env.dodgeReduction = Math.min(MM.dodgeReductionCap, c.dodgeReduction * intensity); any = true; }
+    if (c.healMult != null) { env.healMult = Math.max(MM.healMultFloor, 1 - (1 - c.healMult) * intensity); any = true; }
+    if (c.envDmgPctMaxHp) {
+        let pct = c.envDmgPctMaxHp * intensity;
+        if (c.resistPath && path === c.resistPath) pct *= (c.resistFactor != null ? c.resistFactor : 1); // 对应流派减伤（毒修抗毒瘴）
+        env.envDmgPctMaxHp = Math.min(MM.envDmgPctCap, pct);
+        any = true;
+    }
+    return any ? env : null;
+}
+
+// 关卡词缀对「战斗奖励/掉落」的修正（确定性·全部封顶，避免经济爆炸）。返回归一化对象（无修正项 → 中性默认值）。
+export function getMapRewardMods(mapLevel) {
+    const { mod, intensity } = getMapModifier(mapLevel);
+    const r = mod && mod.reward ? mod.reward : {};
+    const MM = BALANCE.mapMod;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    return {
+        modId: mod ? mod.id : DEFAULT_MAP_MOD.id,
+        expMult: r.expMult ? Math.min(MM.expMultCap, 1 + (r.expMult - 1) * intensity) : 1,
+        // 与 expMult 同样按 intensity「相对缩放」并 clamp 到允许范围：精英关的掉率倾向(灵脉的少掉)一并加深，保持一致。
+        // 注意是相对式 1+(base-1)*intensity（base=0.7→精英0.55），而非 base*intensity（那会把惩罚 0.7×1.5 翻成 1.05 的加成）。
+        gearDropMult: r.gearDropMult != null ? clamp(1 + (r.gearDropMult - 1) * intensity, MM.gearDropMultRange[0], MM.gearDropMultRange[1]) : 1,
+        weaponBias: r.weaponBias ? Math.min(1, r.weaponBias) : 0,
+        herbDropChance: r.herbDropChance ? Math.min(MM.herbDropChanceCap, r.herbDropChance * intensity) : 0,
+        skillDropChance: r.skillDropChance ? Math.min(MM.skillDropChanceCap, r.skillDropChance * intensity) : 0
+    };
 }
 
 // —— 关卡难度 / 敌人属性 ——
@@ -374,7 +492,8 @@ export function finalizeBossStats(boss) {
         name: boss.name,
         maxHp: Math.floor(baseHp * diff),
         atk: Math.floor(baseAtk * diff),
-        def: Math.floor(baseDef * diff)
+        def: Math.floor(baseDef * diff),
+        isBoss: true   // 毒修中毒对 Boss 降效(bossEff)，避免越级磨杀过夸张
     };
 }
 
@@ -510,7 +629,7 @@ export function generateSkillByMatrix(realmLevel) {
 //   ③ 流血(真伤) / 吸血(主动 healRate + 被动吸血)
 //   ④ 敌方出手：定身→格挡→闪避→命中(背水/减伤削减)→反伤
 //   ⑤ 回合末：龟息回血
-export function simulateBattle(stats, enemy, skills) {
+export function simulateBattle(stats, enemy, skills, env = null) {
     const B = BALANCE.battle;
     const C = BALANCE.combat;
     const maxPHp = stats.hp;
@@ -534,6 +653,24 @@ export function simulateBattle(stats, enemy, skills) {
     const openerBonus = stats.openerBonus || 0;
     const rampPerRound = stats.rampPerRound || 0;
     const stunChance = stats.stunChance || 0;
+
+    // —— 毒修中毒(DOT)：出手概率叠毒、逐回合按层数造成真伤(无视防御)；层数封顶、对 Boss 降效，绝不无限叠爆。
+    //    无派 / 非毒修时 stats.poison=null → 全程不触发，对原战斗零影响。
+    const poison = stats.poison || null;
+    const poisonChance = poison ? (poison.chance || 0) : 0;
+    const poisonMaxStacks = poison ? Math.max(0, poison.maxStacks || 0) : 0;
+    const poisonEff = poison ? (enemy.isBoss ? (poison.bossEff != null ? poison.bossEff : 1) : 1) : 0;
+    const poisonPerStack = poison ? Math.floor(stats.atk * (poison.pctOfAtk || 0) / 100 * poisonEff) : 0; // 每层每回合真伤(战斗内固定)
+    let poisonStacks = 0, poisonDealt = 0;
+
+    // —— 地图词缀「战斗环境」（来自 resolveMapEnv；荒原/秘境为 null → 全程零影响）。各项已在 resolveMapEnv 封顶。——
+    const envEnemyCrit = env ? (env.enemyCritChance || 0) : 0;          // 剑冢：敌方暴击率
+    const envEnemyCritMult = env ? (env.enemyCritMult || 1.5) : 1.5;
+    const envDodgeCut = env ? (env.dodgeReduction || 0) : 0;            // 雷泽：玩家闪避削减(百分点)
+    const envHealMult = env && env.healMult != null ? env.healMult : 1; // 魔窟：回血/吸血乘区
+    const envDmg = env && env.envDmgPctMaxHp ? Math.floor(maxPHp * env.envDmgPctMaxHp / 100) : 0; // 毒瘴/雷泽：每回合环境真伤(占气血上限%，已封顶，绝不秒杀)
+    const envLabel = env ? (env.label || '环境') : '';
+    const effDodge = Math.max(0, stats.dodge - envDodgeCut);           // 词缀削减后的有效闪避(≥0)
 
     const enemyEffDef = enemy.def * (1 - armorPen / 100);     // 破甲后的敌防（全程固定）
     const bleedDmg = bleedPct > 0 ? Math.floor(stats.atk * bleedPct / 100) : 0;       // 每回合流血真伤
@@ -573,10 +710,20 @@ export function simulateBattle(stats, enemy, skills) {
         let heal = 0;
         if (active && active.healRate) heal += Math.floor(dmgToE * active.healRate);
         if (lifestealPct > 0) heal += Math.floor(dmgToE * lifestealPct / 100);
+        if (envHealMult !== 1) heal = Math.floor(heal * envHealMult);   // 魔窟：回血/吸血削减
         // 上报「实际生效回血」(封顶后增量)而非名义值：满血时溢出部分不计，飘字才与血条涨幅一致
         if (heal > 0) { const before = pHp; pHp = Math.min(maxPHp, pHp + heal); heal = pHp - before; }
 
         events.push({ side: 'player', round, dmg: dmgToE, isCrit, heal, bleed: bleedDmg, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
+        // 毒修中毒：出手有概率叠一层(封顶 poisonMaxStacks)，再按当前层数对敌造成真伤并记一笔 poison 事件。
+        if (poison && eHp > 0) {
+            if (poisonStacks < poisonMaxStacks && Math.random() * 100 < poisonChance) poisonStacks++;
+            if (poisonStacks > 0 && poisonPerStack > 0) {
+                const pdmg = poisonPerStack * poisonStacks;
+                eHp -= pdmg; poisonDealt += pdmg;
+                events.push({ side: 'poison', round, dmg: pdmg, stacks: poisonStacks, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
+            }
+        }
         if (eHp <= 0) break;
 
         // ④ 敌方出手：定身 → 格挡 → 闪避 → 命中
@@ -584,30 +731,41 @@ export function simulateBattle(stats, enemy, skills) {
             events.push({ side: 'evade', round, text: '定身' });
         } else if (blockPct > 0 && Math.random() * 100 < blockPct) {
             events.push({ side: 'evade', round, text: '格挡' });
-        } else if (Math.random() * 100 < stats.dodge) {
+        } else if (Math.random() * 100 < effDodge) {
             events.push({ side: 'evade', round, text: '闪避' });
         } else {
             let dmgToP = Math.max(1, enemy.atk - stats.def);
             const red = Math.min(C.dmgReductionCap, dmgReduction + (lowHp ? lastStandBonus : 0)); // 减伤(背水加成，统一封顶)
             if (red > 0) dmgToP = Math.max(1, Math.floor(dmgToP * (1 - red / 100)));
+            let eCrit = false;
+            if (envEnemyCrit > 0 && Math.random() * 100 < envEnemyCrit) { dmgToP = Math.floor(dmgToP * envEnemyCritMult); eCrit = true; } // 剑冢：守卫暴击
             pHp -= dmgToP;
             if (thornsDmg > 0) eHp -= thornsDmg;                           // 反伤(真伤)
-            events.push({ side: 'enemy', round, dmg: dmgToP, reflect: thornsDmg, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
+            events.push({ side: 'enemy', round, dmg: dmgToP, reflect: thornsDmg, crit: eCrit, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
             if (eHp <= 0) break;                                            // 反伤也可能反杀
         }
         if (pHp <= 0) break;
 
-        // ⑤ 龟息回血（回合末）。上报实际生效增量(封顶后)，飘字与血条一致。
+        // ⑤ 龟息回血（回合末）。上报实际生效增量(封顶后)，飘字与血条一致。魔窟同样削减龟息。
         if (regenAmt > 0 && pHp < maxPHp) {
             const before = pHp;
-            pHp = Math.min(maxPHp, pHp + regenAmt);
+            const regenEff = envHealMult !== 1 ? Math.floor(regenAmt * envHealMult) : regenAmt;
+            pHp = Math.min(maxPHp, pHp + regenEff);
             events.push({ side: 'regen', round, heal: pHp - before, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
+        }
+
+        // ⑥ 地图词缀环境伤害（毒瘴/雷泽）：回合末灼身，占气血上限%（已封顶 ≤envDmgPctCap，绝不秒杀）。可能致死→记为战败。
+        if (envDmg > 0 && pHp > 0) {
+            pHp -= envDmg;
+            events.push({ side: 'env', round, dmg: envDmg, text: envLabel, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
+            if (pHp <= 0) break;
         }
         round++;
     }
 
     // enemyDead：敌人是否真被打死(用于 Boss——撑满回合"存活"不算击杀)。win 沿用旧义(玩家存活)，地图挂机不变。
-    return { win: pHp > 0, enemyDead: eHp <= 0, events };
+    // poisonDealt：本场中毒(毒修)累计真伤，供战斗日志显式呈现「中毒」事件（无毒修则为 0）。
+    return { win: pHp > 0, enemyDead: eHp <= 0, events, poisonDealt };
 }
 
 // 触发主动技时择招：取「有效倍率最高」的一门（power + level*scale）。

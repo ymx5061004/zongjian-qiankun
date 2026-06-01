@@ -5,7 +5,7 @@
 import { state } from '../state.js';
 import { BALANCE, MAP_NAMES, GEAR_TIERS, MATERIALS } from '../config.js';
 import { formatNumber } from '../util.js';
-import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality, unlockedGearSlots } from '../domain.js';
+import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality, unlockedGearSlots, getMapModifier, resolveMapEnv, getMapRewardMods, generateSkillByMatrix } from '../domain.js';
 import { renderBag, renderMapList, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
 import { checkAchievementsAndNotify } from './achievement.js';
@@ -68,6 +68,9 @@ export function startHangup(mapId) {
     document.getElementById('sprite-e-name').innerText = enemyData.name;
 
     logBattle(`【历练】踏入【${MAP_NAMES[mapId - 1]}】...`);
+    // 地势词缀提示（荒原不提示）：名称 + 描述 + 精英标识，让玩家进场即知战斗环境。
+    const { mod, isElite } = getMapModifier(mapId);
+    if (mod.id !== 'wildland') logBattle(`【地势·${mod.icon}${mod.name}${isElite ? '·精英' : ''}】${mod.desc}`);
     state.hangupTimer = setInterval(() => { executeLoopBattle(mapId); }, BALANCE.battle.intervalMs);
     renderMapList();
 }
@@ -89,6 +92,8 @@ function executeLoopBattle(mapId) {
     const player = state.player;
     const stats = state.finalStats;
     const B = BALANCE.battle;
+    const { mod: mapMod } = getMapModifier(mapId);   // 当前关卡词缀（确定性）
+    const env = resolveMapEnv(mapId, player);        // 战斗环境（荒原/无效果 → null）
 
     state.battleProgress++;
     const enemy = finalizeEnemyStats(mapId);
@@ -98,8 +103,8 @@ function executeLoopBattle(mapId) {
     const pSprite = document.getElementById('sprite-player');
     const eSprite = document.getElementById('sprite-enemy');
 
-    // 纯逻辑算出整场战斗，再按节奏演出
-    const { win, events } = simulateBattle(stats, enemy, player.skills);
+    // 纯逻辑算出整场战斗，再按节奏演出（env=地图词缀战斗环境）
+    const { win, events, poisonDealt } = simulateBattle(stats, enemy, player.skills, env);
 
     events.forEach(ev => {
         const base = (ev.round - 1) * B.animStaggerMs;
@@ -121,26 +126,41 @@ function executeLoopBattle(mapId) {
                 setTimeout(() => eSprite.classList.remove('strike-dash-left'), 100);
                 pSprite.classList.add('hurt-shake');
                 setTimeout(() => pSprite.classList.remove('hurt-shake'), 150);
-                spawnPopupEffect(true, `-${formatNumber(ev.dmg)}`, false);
+                // 剑冢：敌方暴击用橙色加大字号呈现（ev.crit）
+                spawnPopupEffect(true, ev.crit ? `暴击 -${formatNumber(ev.dmg)}` : `-${formatNumber(ev.dmg)}`, ev.crit);
                 // 荆棘反伤：受击同时崩对手一下
                 if (ev.reflect > 0) setTimeout(() => spawnPopupEffect(false, `🌵-${formatNumber(ev.reflect)}`, false), 120);
                 document.getElementById('sprite-p-hp').style.width = ev.pHpPct + "%";
             }, base + B.playerActionDelayMs);
+        } else if (ev.side === 'env') {
+            // 地图词缀环境伤害（毒瘴/雷泽）：玩家逐回合掉血，飘伤害数字；仅首回合记一条日志，避免刷屏。
+            setTimeout(() => {
+                spawnPopupEffect(true, `⚠ -${formatNumber(ev.dmg)}`, false);
+                document.getElementById('sprite-p-hp').style.width = ev.pHpPct + "%";
+            }, base + B.playerActionDelayMs + 30);
+            if (ev.round === 1) logBattle(`⚠️ ${ev.text}，每回合损失约 ${formatNumber(ev.dmg)} 气血。`);
         } else if (ev.side === 'regen') {
             setTimeout(() => {
                 spawnPopupEffect(true, `+${formatNumber(ev.heal)}`, false, true);
                 document.getElementById('sprite-p-hp').style.width = ev.pHpPct + "%";
             }, base + B.playerActionDelayMs);
+        } else if (ev.side === 'poison') {
+            // 毒修中毒：敌方逐回合掉血，飘绿色 ☠ 真伤数字（错峰于主伤害之后，避免与主数字重叠）
+            setTimeout(() => {
+                spawnPopupEffect(false, `☠ -${formatNumber(ev.dmg)}`, false, true);
+                document.getElementById('sprite-e-hp').style.width = ev.eHpPct + "%";
+            }, base + B.playerActionDelayMs + 60);
         } else { // evade：闪避 / 格挡 / 定身（text 决定文案）
             setTimeout(() => { spawnPopupEffect(true, ev.text || "闪避", false); }, base + B.playerActionDelayMs);
         }
     });
 
     if (win) {
+        const rmod = getMapRewardMods(mapId);   // 词缀掉落/收益倾向（全部已封顶）
         const baseCoin = BALANCE.reward.coinBase + mapId * BALANCE.reward.coinPerMap;
         const baseExp = BALANCE.reward.expBase + mapId * BALANCE.reward.expPerMap;
         const coinG = Math.floor(baseCoin * (stats.coinRate / 100));
-        const expG = Math.floor(baseExp);
+        const expG = Math.floor(baseExp * rmod.expMult);   // 灵脉：修为加成（已封顶）
         player.coin += coinG;
         player.exp += expG;
         player.totalCoinEarned = (player.totalCoinEarned || 0) + coinG;
@@ -154,19 +174,41 @@ function executeLoopBattle(mapId) {
         player.materials[oreKey] = (player.materials[oreKey] || 0) + oreQty;
         let bonus = ` 拾得 ${MATERIALS[oreKey].name}×${oreQty}`;
 
-        // 低概率额外掉「该区域档位」的装备(成色随机)——锦上添花，不再是越级随机神装(顶配仍需自己打造/后期副本)
-        const gearChance = BALANCE.reward.baseDrop * (stats.dropRate / 100);
+        // 装备掉落（灵脉降低掉率 gearDropMult / 剑冢偏向兵刃 weaponBias）——锦上添花，顶配仍需自己打造/后期副本
+        const gearChance = BALANCE.reward.baseDrop * (stats.dropRate / 100) * rmod.gearDropMult;
         if (Math.random() < gearChance && player.bag.length < player.bagMax) {
-            const slotPool = unlockedGearSlots(player.realmLevel); // 只掉已解锁部位
+            let slotPool = unlockedGearSlots(player.realmLevel); // 只掉已解锁部位
+            if (rmod.weaponBias && Math.random() < rmod.weaponBias) {
+                const wp = slotPool.filter(s => s.key === 'weapon' || s.key === 'subweapon');
+                if (wp.length) slotPool = wp;                   // 剑冢：偏向兵刃/暗器
+            }
             const newItem = makeGearPiece(regionTier, slotPool[Math.floor(Math.random() * slotPool.length)].key, rollQuality());
             player.bag.push(newItem);
             bonus += `，夺得 [${newItem.name}]`;
+            if (mapMod.id === 'sword_tomb' && newItem.type === 'weapon') player.swordTombWeapons = (player.swordTombWeapons || 0) + 1; // 成就：剑冢寻锋
             // 拖拽进行中不重渲背包：否则会销毁正被拖动的源节点、触发 pointercancel 中止拖拽。
-            // 掉落物 push 在数组末尾不影响正在拖的索引；拖拽结束(落子或取消)会补刷背包。
             if (!isDragging()) renderBag();
         }
+        // 毒瘴：药材掉落（喂炼丹），按关卡深度给对应档草药
+        if (rmod.herbDropChance && Math.random() < rmod.herbDropChance) {
+            const herbKey = mapId >= 45 ? 'herb_3' : (mapId >= 20 ? 'herb_2' : 'herb_1');
+            const hq = 1 + Math.floor(Math.random() * 2);
+            player.materials[herbKey] = (player.materials[herbKey] || 0) + hq;
+            bonus += `，采得 ${MATERIALS[herbKey].name}×${hq}`;
+        }
+        // 魔窟：秘籍掉落（背包有空位时）
+        if (rmod.skillDropChance && Math.random() < rmod.skillDropChance && player.bag.length < player.bagMax) {
+            const sk = generateSkillByMatrix(player.realmLevel);
+            player.bag.push({ id: 'bk_' + Date.now(), name: `秘籍·《${sk.name}》`, type: 'book', payload: sk, price: Math.floor(sk.price / 5) });
+            bonus += `，魔头遗落 [秘籍·《${sk.name}》]`;
+            if (!isDragging()) renderBag();
+        }
+        // 成就：雷泽获胜计数（逆雷而行）
+        if (mapMod.id === 'thunder_marsh') player.thunderWins = (player.thunderWins || 0) + 1;
+
         checkAchievementsAndNotify('battle');
-        logBattle(`✨ 胜利！碎银+${formatNumber(coinG)}，修为+${formatNumber(expG)}。${bonus}`);
+        const poisonNote = poisonDealt > 0 ? `（淬毒灼烧 ${formatNumber(poisonDealt)}）` : '';
+        logBattle(`✨ 胜利！碎银+${formatNumber(coinG)}，修为+${formatNumber(expG)}。${bonus}${poisonNote}`);
     } else {
         const loseCoin = Math.floor(player.coin * BALANCE.reward.loseCoinRate);
         player.coin -= loseCoin;
@@ -181,5 +223,7 @@ function executeLoopBattle(mapId) {
     }, B.hpResetDelayMs);
 
     updatePlayerAttributes();
-    maybeUpdateQuestProgress({ battleCount: 1 }); // 指引「初入江湖」（每场战斗 +1，胜负皆计）
+    const questDelta = { battleCount: 1 };                                  // 指引「初入江湖」（每场战斗 +1，胜负皆计）
+    if (win && mapMod.id !== 'wildland') questDelta.affixStageWins = 1;     // 指引「识地势」（通关词缀关卡）
+    maybeUpdateQuestProgress(questDelta);
 }
