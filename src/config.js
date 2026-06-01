@@ -32,7 +32,7 @@ export const GEAR_SLOTS = [
     { key: 'ring',      label: '配饰', realmReq: 1 },
     { key: 'artifact',  label: '法宝', realmReq: 1 },
     { key: 'amulet',    label: '护符', realmReq: 11 },  // 先天解锁(暴击/血)
-    { key: 'gloves',    label: '护腕', realmReq: 21 },  // 宗师解锁(攻击/暴击)
+    { key: 'gloves',    label: '护腕1', realmReq: 21 },  // 宗师解锁(攻击/暴击)
     { key: 'boots',     label: '战靴', realmReq: 31 }   // 大宗师解锁(闪避/血)
 ];
 
