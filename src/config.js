@@ -250,7 +250,9 @@ export const BALANCE = {
     hhSkillPrice: 380000,
 
     shopHHChance: 0.4,                        // 黑市出现洪荒孤本的概率
-    shopRefreshCost: 500,                     // 黑市手动刷新花费(文)
+    // —— 黑市手动刷新：费用几何递增 + 随真实时间衰减（反「500 文无限刷新钓鱼」）——
+    // 每刷一次 step+1、费用 ×growth；空闲每 decayMs 回落一步 → 偶尔刷便宜、连刷暴涨。step 封顶 maxStep。
+    shopRefresh: { base: 500, growth: 1.8, decayMs: 90000, maxStep: 12 },
 
     // —— 生产/挂机引擎（采矿·锻造…通用）——
     idle: {
@@ -312,26 +314,54 @@ export const BALANCE = {
     },
 
     // —— 修行流派切换花费（首次择道免费；之后改换门庭按已切换次数几何递增碎银，抑制频繁反复横跳）——
-    // 第 n 次切换(n=pathSwitchCount, 从0计) = round(switchCoinBase * switchCoinGrowth^n / 1000)*1000。
     path: { switchCoinBase: 80000, switchCoinGrowth: 1.8 },
 
-    // —— 地图词缀（关卡特性）旋钮：分配节奏 + 各效果硬上限（确定性·可解释·不爆经济/不秒杀）——
-    // 分配：前 earlySafeStages 关恒为荒原；非 milestoneEvery 倍数关为荒原；倍数关按非默认词缀顺序轮转；
-    //       eliteEvery 倍数关为「精英」(词缀强度 ×eliteIntensity，各效果仍各自封顶)。详见 domain.getMapModifier。
-    // 所有数值上限集中在此，调平衡只动这里。
+    // —— 地图词缀（关卡特性）旋钮：分配节奏 + 各效果硬上限 ——
     mapMod: {
-        earlySafeStages: 3,            // 前 N 关恒为荒原（新手友好，不上惩罚词缀）
-        milestoneEvery: 5,             // 每 N 关出现一个明显词缀（其余关为荒原·均衡）
-        eliteEvery: 10,                // 每 N 关为「精英关」（词缀强化 + UI 提示）
-        eliteIntensity: 1.5,           // 精英关词缀强度倍率（作用于环境伤害/敌暴击/掉率加成，再各自封顶）
-        envDmgPctCap: 5,               // 单回合环境伤害上限（占气血上限 %）——绝不秒杀
-        dodgeReductionCap: 25,         // 闪避削减上限（百分点）
-        enemyCritCap: 60,              // 敌方暴击率上限（%）
-        healMultFloor: 0.2,            // 回血/吸血最低保留比例（魔窟）
-        expMultCap: 1.6,               // 修为加成上限（灵脉）
-        gearDropMultRange: [0.5, 1.6], // 装备掉率乘区允许范围
-        herbDropChanceCap: 0.35,       // 药材掉落概率上限（毒瘴）
-        skillDropChanceCap: 0.1        // 秘籍掉落概率上限（魔窟）
+        earlySafeStages: 3, milestoneEvery: 5, eliteEvery: 10, eliteIntensity: 1.5,
+        envDmgPctCap: 5, dodgeReductionCap: 25, enemyCritCap: 60, healMultFloor: 0.2,
+        expMultCap: 1.6, gearDropMultRange: [0.5, 1.6], herbDropChanceCap: 0.35, skillDropChanceCap: 0.1
+    },
+
+    // —— 百世轮回 Roguelite（节点战斗强度 / 寿元 / 节点收益，全在这一处调）——
+    // ⚖️ 敌人强度针对「新角色基线(约 250血/35攻/15防)」调校：
+    //   普通节点轻松、精英有风险、区域Boss 需积累战力或正确策略；老存档高战力玩家会碾压前期(设定使然)。
+    //   敌人 = enemy基准 × typeMult[类型] × (1+regionStep·区域序) × (1+lifeStep·(世-1)) × (1+nodeDiffStep·(难度-1)) × 修饰enemyMult。
+    roguelite: {
+        startAge: 16, maxAge: 80,        // 寿元(回合预算)：每节点流逝 ageCostPerNode，归零即结算
+        ageCostPerNode: 3, ageCostRest: 1,
+        bossUnlockNodes: 4,              // 探索 N 个非Boss节点后解锁区域Boss
+        regionStep: 0.55, lifeStep: 0.10, nodeDiffStep: 0.12,
+        enemy: { hp: 110, atk: 20, def: 3 },
+        typeMult: {
+            battle: { hp: 1.1, atk: 1.0, def: 1.0 },
+            elite:  { hp: 2.4, atk: 1.5, def: 2.0 },
+            boss:   { hp: 5.5, atk: 1.9, def: 3.0 }
+        },
+        coinPerNode: 120, expPerNode: 80, // 节点基准收益(再乘区域档/难度/修饰/命格遗产)
+        restHealPct: 0.6,                 // 调息节点恢复「最大气血」的比例
+        mineQty: [3, 6], herbQty: [3, 6], forgeIngot: [2, 4],
+        // —— 轮回遗产门槛（反「无功绩空轮回刷永久属性」）——
+        // 本世须达「≥legacyMinNodes 个节点 或 击破过 Boss」才发放轮回遗产；否则碌碌一生、无传承。
+        legacyMinNodes: 3,
+
+        // —— 第二阶段 ——
+        // 分支节点图：每行节点数（生成 DAG 时按此切行，boss 独占末行）。
+        mapPerRow: 3,
+        // 本世奇珍/感悟：精英/Boss 战胜后 3 选 1 领悟。
+        talent: { eliteChoice: 3, bossChoice: 3 },
+        // 区域之主·机制化：残血狂暴(一次性提攻) + 周期蓄力大招(逢 chargeEvery 回合的一击 ×chargeMult)。
+        bossMech: { enrageAt: 30, enrageMult: 1.5, chargeEvery: 4, chargeMult: 2.2 },
+        // 因果阈值：高因果触发 Boss「天罚」反噬（更强、厚赏、斩之洗去部分业力）；低因果得善缘庇佑（本世增益）。
+        karma: {
+            highThresh: 6,            // 因果 ≥ 此值：Boss 叠「天罚」反噬
+            lowThresh: -4,            // 因果 ≤ 此值：善缘庇佑
+            backlashCoin: 1.0,        // 反噬 Boss 额外碎银倍率(+100%)
+            backlashCrystal: 2,       // 反噬 Boss 额外神魂结晶
+            backlashKarmaCleanse: 4,  // 斩反噬 Boss 洗去因果
+            goodShopDiscount: 0.10,   // 善缘：黑市/节点商人折扣 +10%
+            goodEventBonus: 0.20      // 善缘：奇遇收益 +20%
+        }
     }
 };
 

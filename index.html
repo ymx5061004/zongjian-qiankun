@@ -39,6 +39,8 @@
             <div class="menu-group">
                 <div class="menu-group-title" data-act="toggle-group">修行历练</div>
                 <div class="menu-items">
+                    <button class="menu-item active" data-act="switch-page" data-page="run"><span class="menu-icon">☯</span>百世轮回</button>
+                    <button class="menu-item" data-act="switch-page" data-page="codex"><span class="menu-icon">📓</span>江湖录</button>
                     <button class="menu-item" data-act="switch-page" data-page="quest"><span class="menu-icon">🧭</span>江湖指引</button>
                     <button class="menu-item" data-act="switch-page" data-page="role"><span class="menu-icon">👤</span>修真命格</button>
                     <button class="menu-item" data-act="switch-page" data-page="path"><span class="menu-icon">☯️</span>修行流派</button>
@@ -60,7 +62,7 @@
             <div class="menu-group">
                 <div class="menu-group-title" data-act="toggle-group">行囊武学</div>
                 <div class="menu-items">
-                    <button class="menu-item active" data-act="switch-page" data-page="bag"><span class="menu-icon">🎒</span>行囊与洪炉</button>
+                    <button class="menu-item" data-act="switch-page" data-page="bag"><span class="menu-icon">🎒</span>行囊与洪炉</button>
                     <button class="menu-item" data-act="switch-page" data-page="kungfu"><span class="menu-icon">📖</span>百修秘籍</button>
                     <button class="menu-item" data-act="switch-page" data-page="achievement"><span class="menu-icon">🏆</span>成就图鉴</button>
                 </div>
@@ -81,6 +83,20 @@
         </aside>
 
         <div class="game-content">
+        <div id="page-run" class="page active">
+            <div class="sub-panel" style="grid-column: span 2;">
+                <div class="panel-title">☯ 百世轮回 · 江湖路 <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">（开局命格 → 江湖棋盘 → 战斗/奇遇/生产 → 流派构筑 → 生死结算 → 轮回遗产 → 下一世变局）</span></div>
+                <div class="scroll-box" id="run-root" style="max-height: 74vh; margin-top: 4px;"></div>
+            </div>
+        </div>
+
+        <div id="page-codex" class="page">
+            <div class="sub-panel" style="grid-column: span 2;">
+                <div class="panel-title">📓 江湖录 · 图鉴与历世记录 <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">（策略/命格/遗产/感悟/敌词条 全图鉴 + 历世记录 + 流派构筑建议）</span></div>
+                <div class="scroll-box" id="codex-root" style="max-height: 74vh; margin-top: 4px;"></div>
+            </div>
+        </div>
+
         <div id="page-role" class="page">
             <div class="sub-panel">
                 <div class="panel-title">角色命格根骨</div>
@@ -181,7 +197,7 @@
             </div>
         </div>
 
-        <div id="page-bag" class="page active">
+        <div id="page-bag" class="page">
             <div class="sub-panel" style="grid-column: span 2;">
                 <div class="panel-title" style="color: #e67e22;">🔥 天地洪炉 (万物合成)</div>
                 <div style="display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 10px;">

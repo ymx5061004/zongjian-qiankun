@@ -4,7 +4,8 @@
 // ============================================================
 import { state } from './state.js';
 import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES, GEAR_SLOTS } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost, getCraftAffixById, applyCraftAffix, getBossPlan, materialSourceHint } from './domain.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost, getCraftAffixById, applyCraftAffix, getBossPlan, materialSourceHint, shopRefreshCost, decayedRefreshSteps } from './domain.js';
+import { getModifiers } from './run.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
@@ -206,18 +207,23 @@ export function buyShopSkill(idx) {
     saveGame();
 }
 
-// —— 黑市付费刷新：扣 shopRefreshCost 文，重随机整架货 ——
+// —— 黑市付费刷新：费用几何递增 + 随真实时间衰减（反「500 文无限刷新钓鱼」）。重随机整架货。——
 export function refreshShop() {
     const player = state.player;
-    const cost = BALANCE.shopRefreshCost;
-    if (player.coin < cost) { toast(`刷新黑市需 ${cost} 文碎银，碎银不足。`, 'error'); return; }
+    if (!player.shop || typeof player.shop !== 'object') player.shop = { refreshCount: 0, lastRefreshAt: 0 };
+    const now = Date.now();
+    const steps = decayedRefreshSteps(player.shop, now);  // 距上次刷新已衰减后的连刷步数
+    const cost = shopRefreshCost(steps);
+    if (player.coin < cost) { toast(`刷新黑市需 ${formatNumber(cost)} 文碎银，碎银不足（连刷涨价，稍候片刻会回落）。`, 'error'); return; }
     player.coin -= cost;
+    player.shop.refreshCount = Math.min(BALANCE.shopRefresh.maxStep, steps + 1);
+    player.shop.lastRefreshAt = now;
     rollShopGoods();
     hideTooltip();
     updatePlayerAttributes();
     recordShopVisit(); // 指引「黑市问价」（幂等：进入黑市时通常已记录，此处刷新仅作兜底，不会重复计数）
     saveGame();
-    toast(`已消耗 ${cost} 文，黑市新进了一批货。`, 'success');
+    toast(`已消耗 ${formatNumber(cost)} 文，黑市新进了一批货。`, 'success');
 }
 
 // —— 黑市常驻：花碎银买 1 格背包扩容（梅尔沃 Bank Slot 式，价随已扩次数几何递增）——
@@ -723,10 +729,13 @@ export function takePill(key) {
     player.materials[key]--;
     if (player.materials[key] <= 0) delete player.materials[key];
     if (!player.pillBonus) player.pillBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
-    for (const [k, v] of Object.entries(m.pill)) player.pillBonus[k] = (player.pillBonus[k] || 0) + v;
+    // 命格/遗产「丹毒抗性·药灵根」→ 服丹永久增益放大（pillPowerMult）。
+    const pillMul = 1 + (getModifiers(player).pillPowerMult || 0);
+    const applied = {};
+    for (const [k, v] of Object.entries(m.pill)) { const av = Math.max(v > 0 ? 1 : v, Math.round(v * pillMul)); player.pillBonus[k] = (player.pillBonus[k] || 0) + av; applied[k] = av; }
     renderPills();
     updatePlayerAttributes();
     saveGame();
-    const eff = Object.entries(m.pill).map(([k, v]) => `${PILL_LABEL[k]}+${v}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('、');
+    const eff = Object.entries(applied).map(([k, v]) => `${PILL_LABEL[k]}+${v}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('、');
     toast(`服下【${m.name}】，永久 ${eff}！`, 'success');
 }

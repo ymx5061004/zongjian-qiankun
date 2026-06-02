@@ -111,3 +111,78 @@ export function chooseAction(title, message, options) {
 export function infoDialog(message, title = '', btnLabel = '好') {
     return openModal(title, message, [{ label: btnLabel, value: true, cls: 'btn-success' }]);
 }
+
+// —— 卡片式多选（百世轮回：命格 / 轮回遗产 / 奇遇事件 三选一/多选）——
+// cards: [{ title, desc, value, cls?, disabled?, tag?, locked? }]；intro 为顶部富文本说明（innerHTML）。
+// opts.cancelLabel：给出则附一个取消按钮(返回 null)；不给则为「必须抉择」(无法点遮罩/Esc 取消)。
+// 返回所选 value；取消(若允许) 返回 null。样式自带，复用既有 .btn 配色变量，无需改 CSS。
+export function chooseCard(title, intro, cards, opts = {}) {
+    const cancelable = typeof opts.cancelLabel === 'string';
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        Object.assign(overlay.style, {
+            position: 'fixed', inset: '0', zIndex: '10001', background: 'rgba(5,5,5,0.78)',
+            display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '16px', boxSizing: 'border-box'
+        });
+        const box = document.createElement('div');
+        Object.assign(box.style, {
+            background: '#161616', border: '1px solid var(--color-gold)', borderRadius: '10px',
+            padding: '22px 22px 18px', maxWidth: '560px', width: '100%', maxHeight: '88vh', overflowY: 'auto',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.9)', boxSizing: 'border-box'
+        });
+        if (title) {
+            const h = document.createElement('div');
+            h.textContent = title;
+            Object.assign(h.style, { color: 'var(--color-gold)', fontSize: '18px', fontWeight: 'bold', letterSpacing: '1px', textAlign: 'center', marginBottom: '10px' });
+            box.appendChild(h);
+        }
+        if (intro) {
+            const p = document.createElement('div');
+            p.innerHTML = intro;
+            Object.assign(p.style, { color: '#bbb', fontSize: '13px', lineHeight: '1.7', textAlign: 'center', marginBottom: '16px' });
+            box.appendChild(p);
+        }
+
+        const onKey = (e) => { if (cancelable && e.key === 'Escape') close(null); };
+        function close(val) { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); }
+
+        cards.forEach(c => {
+            const card = document.createElement('button');
+            card.className = 'choice-card ' + (c.cls || '');
+            card.disabled = !!c.disabled;
+            Object.assign(card.style, {
+                display: 'block', width: '100%', textAlign: 'left', cursor: c.disabled ? 'not-allowed' : 'pointer',
+                background: c.disabled ? '#101010' : '#101820', color: '#ddd',
+                border: '1px solid ' + (c.disabled ? '#2a2a2a' : 'var(--border-color)'),
+                borderRadius: '8px', padding: '12px 14px', marginBottom: '10px', transition: 'all 0.12s',
+                opacity: c.disabled ? '0.5' : '1'
+            });
+            const tag = c.tag ? `<span style="float:right;font-size:11px;color:var(--color-gold);font-weight:bold;">${c.tag}</span>` : '';
+            const lock = c.locked ? `<span style="float:right;font-size:11px;color:var(--color-accent);">🔒 ${c.locked}</span>` : '';
+            card.innerHTML =
+                `<div style="font-weight:bold;font-size:15px;color:var(--color-gold);margin-bottom:4px;">${c.title}${tag}${lock}</div>` +
+                `<div style="font-size:12px;color:#aaa;line-height:1.6;">${c.desc || ''}</div>`;
+            if (!c.disabled) {
+                card.onmouseenter = () => { card.style.borderColor = 'var(--color-gold)'; card.style.background = '#16222c'; };
+                card.onmouseleave = () => { card.style.borderColor = 'var(--border-color)'; card.style.background = '#101820'; };
+                card.onclick = () => close(c.value);
+            }
+            box.appendChild(card);
+        });
+
+        if (cancelable) {
+            const row = document.createElement('div');
+            Object.assign(row.style, { textAlign: 'center', marginTop: '6px' });
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.textContent = opts.cancelLabel;
+            btn.onclick = () => close(null);
+            row.appendChild(btn);
+            box.appendChild(row);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+        }
+        document.addEventListener('keydown', onKey);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+    });
+}

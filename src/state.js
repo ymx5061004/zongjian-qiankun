@@ -5,6 +5,20 @@
 // （用一个 state 对象持有，便于 loadGame 整体替换 player 引用）
 // ============================================================
 
+// 「百世轮回」本世 Run 状态：每开启/轮回一世重建（见 run.startLife）。
+//   lifeNo 世数；age/maxAge 寿元(回合预算)；hp 本世当前气血(null=控制层填满)；karma 因果；
+//   regionId/regionIndex 当前区域；nodeMap 当前一世的江湖节点图；currentNodeId/visitedNodes 探索进度；
+//   selectedTactic 战前策略；lifepathId 本世命格；runTalents 预留(本世临时增益)；worldFlags 世界标记(驱动事件条件)。
+export function makeDefaultRun() {
+    return {
+        lifeNo: 1, age: 16, maxAge: 80, hp: null, karma: 0,
+        regionId: null, regionIndex: 0,
+        nodeMap: [], currentNodeId: null, visitedNodes: [],
+        nodesDone: 0, clearedBosses: 0, coinGained: 0, expGained: 0,
+        selectedTactic: 'balanced', lifepathId: null, runTalents: [], worldFlags: {}
+    };
+}
+
 export function makeDefaultPlayer() {
     return {
         name: "", realmLevel: 1, exp: 0, coin: 50000, rebornCount: 0,
@@ -35,8 +49,20 @@ export function makeDefaultPlayer() {
         maxMapCleared: 0,
         // —— 地图词缀成就计数 —— 在特定词缀关卡建功（逆雷而行 / 剑冢寻锋）。
         thunderWins: 0,          // 在「雷泽」词缀关卡的获胜次数
-        swordTombWeapons: 0      // 在「剑冢」词缀关卡夺得的兵刃件数
+        swordTombWeapons: 0,     // 在「剑冢」词缀关卡夺得的兵刃件数
+        // —— 百世轮回 Roguelite ——
+        run: makeDefaultRun(),  // 本世进行态（每世重建）
+        legacies: [],           // 永久轮回遗产 id 列表（跨世累积，可重复＝叠加）
+        // —— 黑市手动刷新计数（费用递增+时间衰减；不入挂机，跨会话保留）——
+        shop: { refreshCount: 0, lastRefreshAt: 0 },
+        // —— 历世记录（江湖录·元进度；跨世永久累积）——
+        records: makeDefaultRecords()
     };
+}
+
+// 历世记录：最高世数 / 最深区域 / 最佳本世评分与评价 / 累计斩 Boss / 飞升次数 / 见过的本世感悟。
+export function makeDefaultRecords() {
+    return { maxLifeNo: 1, deepestRegion: 0, bestScore: 0, bestGrade: '-', bossKills: 0, ascensions: 0, talentsSeen: [] };
 }
 
 export const state = {

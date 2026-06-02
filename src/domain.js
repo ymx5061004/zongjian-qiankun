@@ -6,6 +6,8 @@ import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
     COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS, CULTIVATION_PATHS, MAP_MODIFIERS, CRAFT_AFFIXES, ACTIVITIES
 } from './config.js';
+// 命格/轮回遗产 修正聚合（百世轮回）。run.js 仅依赖 config，本处单向依赖，无循环。
+import { getModifiers } from './run.js';
 const LEGENDARY_QUALITY = 5;
 
 // —— 境界名 ——
@@ -798,6 +800,16 @@ export function computeStats(player) {
         dropRate: 100,
         coinRate: 100
     };
+
+    // —— 命格 / 轮回遗产 修正（百世轮回）——
+    // 在洪荒乘区之后再叠一层「本世命格 + 永久遗产」的乘区/加点；旧档/未入轮回者修正为恒等，零影响。
+    const mods = getModifiers(player);
+    stats.hp = Math.max(1, Math.floor(stats.hp * mods.hpMult));
+    stats.atk = Math.max(1, Math.floor(stats.atk * mods.atkMult));
+    stats.def = Math.max(0, Math.floor(stats.def * mods.defMult));
+    stats.crit = parseFloat((stats.crit + mods.critAdd).toFixed(1));
+    stats.dodge = parseFloat(Math.max(0, Math.min(BALANCE.dodgeCap, stats.dodge + mods.dodgeAdd)).toFixed(1));
+
     player.skills.forEach(sk => {
         if (sk.type === 'passive') {
             if (sk.dropRate) stats.dropRate += (sk.dropRate * sk.level);
@@ -817,10 +829,15 @@ export function computeStats(player) {
             COMBAT_AFFIX_KEYS.forEach(k => { if (sk[k]) stats[k] += (sk[k] * sk.level); });
         }
     });
-    // 流派词条加成（剑修暴伤 critDmg / 体修反震 thornsPct / 身法先发 openerBonus 等）——叠加进对应词条池。
+    // 流派词条加成（剑修暴伤 / 体修反震 / 身法先发 等）——叠加进对应词条池。
     COMBAT_AFFIX_KEYS.forEach(k => { if (pf[k]) stats[k] += pf[k]; });
     // 毒修：把中毒参数随属性带入战斗（无派/非毒修为 null → simulateBattle 不触发中毒、零影响）。
     stats.poison = M.poison;
+    // —— 第二阶段·本世奇珍/感悟 的「战斗词条增量」叠加（缺省 0；与秘籍词条/流派词条同字段累加，不影响旧档）——
+    stats.dmgReduction += mods.dmgReductionAdd || 0;
+    stats.regenPct += mods.regenAdd || 0;
+    stats.thornsPct += mods.thornsAdd || 0;
+    stats.lifestealPct += mods.lifestealAdd || 0;
 
     return { stats, honghuangPower };
 }
@@ -1059,6 +1076,22 @@ export function bagExpandCost(bagMax) {
     return { cost, addSlots: 1, nextMax: bagMax + 1 };
 }
 
+// —— 黑市手动刷新费用（纯函数）：steps 为「已衰减后的连刷步数」，费用 = base×growth^steps（取整到百，不低于 base）。——
+export function shopRefreshCost(steps) {
+    const R = BALANCE.shopRefresh;
+    return Math.max(R.base, Math.round(R.base * Math.pow(R.growth, Math.max(0, steps)) / 100) * 100);
+}
+// 计算「当前生效的连刷步数」：在存档计数基础上，按距上次刷新经过的时间衰减（每 decayMs 回落一步）。now 由调用方传入(Date.now)。
+export function decayedRefreshSteps(shop, now) {
+    if (!shop) return 0;
+    let c = shop.refreshCount || 0;
+    if (shop.lastRefreshAt) {
+        const d = Math.floor((now - shop.lastRefreshAt) / BALANCE.shopRefresh.decayMs);
+        if (d > 0) c = Math.max(0, c - d);
+    }
+    return c;
+}
+
 // —— 随机秘籍生成（价格随境界）——
 export function generateSkillByMatrix(realmLevel) {
     const suff = SKILL_SUFFIXES[Math.floor(Math.random() * SKILL_SUFFIXES.length)];
@@ -1086,14 +1119,36 @@ export function generateSkillByMatrix(realmLevel) {
 //   ③ 流血(真伤) / 吸血(主动 healRate + 被动吸血)
 //   ④ 敌方出手：定身→格挡→闪避→命中(背水/减伤削减)→反伤
 //   ⑤ 回合末：龟息回血
-export function simulateBattle(stats, enemy, skills, env = null) {
+// opts（百世轮回扩展，全部可选，缺省＝原行为；现有 3 参调用零影响）：
+//   tactic / startHp / vsBonusPct / poisonMult —— Roguelite 节点战斗扩展
+//   env —— 地图词缀环境对象（百关征途地图词缀扩展）；也可直接把 env 对象作为 opts 传入（向后兼容）
+export function simulateBattle(stats, enemy, skills, opts = {}) {
+    // 提取 env：支持两种调用约定 { env: {...} } 或直接把 env 对象作为第4参传入
+    const env = opts.env || (opts.envDmgPctMaxHp != null || opts.enemyCritChance != null || opts.healMult != null ? opts : null);
     const B = BALANCE.battle;
     const C = BALANCE.combat;
+    const tactic = opts.tactic || null;
+    const vsBonusPct = opts.vsBonusPct || 0;
+    const poisonMult = Number.isFinite(opts.poisonMult) ? opts.poisonMult : 1;
     const maxPHp = stats.hp;
+    const eMaxHp = enemy.maxHp;
     let eHp = enemy.maxHp;
-    let pHp = maxPHp;
+    let pHp = Number.isFinite(opts.startHp) ? Math.max(1, Math.min(maxPHp, opts.startHp)) : maxPHp;
+    let tacticPoisonStacks = 0;  // 战前策略「淬毒」的叠层计数（与修行流派的毒修 poisonStacks 分开）
     const events = [];
     const activePool = skills.filter(s => s.type === 'active');
+    // —— 敌人词条（第二阶段·精英/Boss 词条化；缺省 0 → 百关/秘境敌人零影响）——
+    const eRegen = enemy.regenPct || 0;        // 每回合回复最大气血%
+    const eThorns = enemy.thornsPct || 0;      // 受击反弹你本次伤害%（真伤）
+    const eDmgRed = enemy.dmgReduction || 0;   // 受到伤害-%
+    const eLifesteal = enemy.lifesteal || 0;   // 命中你时回血%（按命中伤害）
+    // —— 区域之主·机制（第三阶段；缺省无效 → 百关/秘境/普通节点零影响）——
+    const enrageAt = enemy.enrageAt || 0;      // 残血<此%触发一次性狂暴
+    const enrageMult = enemy.enrageMult || 1;
+    const chargeEvery = enemy.chargeEvery || 0;// 逢此回合数蓄力大招
+    const chargeMult = enemy.chargeMult || 1;
+    let enemyAtk = enemy.atk;                   // 可变敌攻（狂暴提升）
+    let enraged = false;
 
     // —— 取词条 mod（缺省 0；带 cap 的就地封顶）——
     const critDmg = stats.critDmg || 0;
@@ -1139,12 +1194,24 @@ export function simulateBattle(stats, enemy, skills, env = null) {
     while (eHp > 0 && pHp > 0 && round <= B.maxRounds) {
         const lowHp = (pHp / maxPHp) * 100 < C.lastStandThresh;   // 背水：本回合自身残血？(回合初判定)
 
+        // 策略·养剑：到达爆发回合，先记一条日志（演出/结果面板可见）
+        if (tactic && tactic.chargeAt === round) events.push({ side: 'tactic', round, text: '⚡ 养剑·爆发！' });
+
         // ① 增伤池
-        let bonusPct = dmgBonus;
+        let bonusPct = dmgBonus + vsBonusPct;                                               // 词条增伤 + 对精英/Boss 针对增伤
         if (round <= C.openerRounds) bonusPct += openerBonus;                              // 先发制人
         if (rampPerRound) bonusPct += rampPerRound * Math.min(round - 1, C.rampMaxStacks); // 越战越勇
         if ((eHp / enemy.maxHp) * 100 < C.executeThresh) bonusPct += executeBonus;          // 斩杀
         if (lowHp) bonusPct += lastStandBonus;                                              // 背水(进攻侧)
+        // —— 战前策略·出招修正（疾攻先发增伤 / 守心降攻 / 养剑前期蓄力·第N回合爆发）——
+        if (tactic) {
+            if (tactic.openerRounds && round <= tactic.openerRounds) bonusPct += (tactic.openerDmgPct || 0);
+            if (tactic.outPct) bonusPct += tactic.outPct;
+            if (tactic.chargeAt) {
+                if (round < tactic.chargeAt) bonusPct += (tactic.prePct || 0);
+                else if (round === tactic.chargeAt) bonusPct += (tactic.burstPct || 0);
+            }
+        }
 
         // ② 玩家出手
         const isCrit = Math.random() * 100 < stats.crit;
@@ -1160,7 +1227,8 @@ export function simulateBattle(stats, enemy, skills, env = null) {
         if (bonusPct) dmg = Math.floor(dmg * (1 + bonusPct / 100));
         if (isCrit) dmg = Math.floor(dmg * (B.critMult + critDmg / 100));   // 暴伤为暴击乘区的额外加成
 
-        const dmgToE = Math.max(1, Math.floor(dmg - enemyEffDef));
+        let dmgToE = Math.max(1, Math.floor(dmg - enemyEffDef));
+        if (eDmgRed > 0) dmgToE = Math.max(1, Math.floor(dmgToE * (1 - eDmgRed / 100))); // 敌·护体减伤
         if (dmgToE > maxHit) maxHit = dmgToE;                               // 成就：单次最高伤害
         eHp -= dmgToE;
         if (bleedDmg > 0) eHp -= bleedDmg;                                  // ③ 流血(无视防御)
@@ -1174,7 +1242,7 @@ export function simulateBattle(stats, enemy, skills, env = null) {
         if (heal > 0) { const before = pHp; pHp = Math.min(maxPHp, pHp + heal); heal = pHp - before; }
 
         events.push({ side: 'player', round, dmg: dmgToE, isCrit, heal, bleed: bleedDmg, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
-        // 毒修中毒：出手有概率叠一层(封顶 poisonMaxStacks)，再按当前层数对敌造成真伤并记一笔 poison 事件。
+        // 毒修中毒（修行流派·毒修）：出手有概率叠一层，再按当前层数对敌造成真伤。
         if (poison && eHp > 0) {
             if (poisonStacks < poisonMaxStacks && Math.random() * 100 < poisonChance) poisonStacks++;
             if (poisonStacks > 0 && poisonPerStack > 0) {
@@ -1183,6 +1251,21 @@ export function simulateBattle(stats, enemy, skills, env = null) {
                 events.push({ side: 'poison', round, dmg: pdmg, stacks: poisonStacks, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
             }
         }
+        // 战前策略·淬毒（Roguelite）：与毒修分轴，各自独立叠层（一个来自流派，一个来自策略选择）。
+        if (tactic && tactic.poisonPctPerStack) {
+            tacticPoisonStacks += 1;
+            const pd = Math.floor(stats.atk * (tactic.poisonPctPerStack * tacticPoisonStacks) / 100 * poisonMult);
+            if (pd > 0) {
+                eHp -= pd;
+                events.push({ side: 'tactic', round, text: `淬毒(${tacticPoisonStacks}层) -${pd}`, poison: pd, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
+            }
+        }
+        // 敌·荆棘：受击反弹你本次伤害的真伤（可能反杀你）
+        if (eThorns > 0) {
+            const t = Math.floor(dmgToE * eThorns / 100);
+            if (t > 0) { pHp -= t; events.push({ side: 'ethorns', round, dmg: t, pHpPct: Math.max(0, (pHp / maxPHp) * 100) }); }
+        }
+        if (pHp <= 0) break;
         if (eHp <= 0) break;
 
         // ④ 敌方出手：定身 → 格挡 → 闪避 → 命中
@@ -1194,15 +1277,26 @@ export function simulateBattle(stats, enemy, skills, env = null) {
             dodges++;                                                      // 成就：闪避计数
             events.push({ side: 'evade', round, text: '闪避' });
         } else {
-            let dmgToP = Math.max(1, enemy.atk - stats.def);
+            // 区域之主·残血狂暴（一次性提攻）
+            if (!enraged && enrageAt > 0 && (eHp / eMaxHp) * 100 < enrageAt) {
+                enraged = true; enemyAtk = Math.floor(enemyAtk * enrageMult);
+                events.push({ side: 'tactic', round, text: '⚠ 区域之主·狂暴！' });
+            }
+            // 区域之主·周期蓄力大招
+            const charged = chargeEvery > 0 && round % chargeEvery === 0;
+            const curAtk = charged ? Math.floor(enemyAtk * chargeMult) : enemyAtk;
+            let dmgToP = Math.max(1, curAtk - stats.def);
             const red = Math.min(C.dmgReductionCap, dmgReduction + (lowHp ? lastStandBonus : 0)); // 减伤(背水加成，统一封顶)
             if (red > 0) dmgToP = Math.max(1, Math.floor(dmgToP * (1 - red / 100)));
             let eCrit = false;
             if (envEnemyCrit > 0 && Math.random() * 100 < envEnemyCrit) { dmgToP = Math.floor(dmgToP * envEnemyCritMult); eCrit = true; } // 剑冢：守卫暴击
+            if (tactic && tactic.takenPct) dmgToP = Math.max(1, Math.floor(dmgToP * (1 + tactic.takenPct / 100)));
             pHp -= dmgToP;
             dmgTaken += dmgToP;                                            // 成就：累计受伤
-            if (thornsDmg > 0) eHp -= thornsDmg;                           // 反伤(真伤)
-            events.push({ side: 'enemy', round, dmg: dmgToP, reflect: thornsDmg, crit: eCrit, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
+            if (thornsDmg > 0) eHp -= thornsDmg;                           // 我方反伤(真伤)
+            let eHeal = 0;                                                  // 敌·嗜血：命中你时回血
+            if (eLifesteal > 0 && eHp > 0) { eHeal = Math.floor(dmgToP * eLifesteal / 100); if (eHeal > 0) eHp = Math.min(eMaxHp, eHp + eHeal); }
+            events.push({ side: 'enemy', round, dmg: dmgToP, reflect: thornsDmg, eHeal, charged, crit: eCrit, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
             if (eHp <= 0) break;                                            // 反伤也可能反杀
         }
         if (pHp <= 0) break;
@@ -1215,19 +1309,24 @@ export function simulateBattle(stats, enemy, skills, env = null) {
             events.push({ side: 'regen', round, heal: pHp - before, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
         }
 
-        // ⑥ 地图词缀环境伤害（毒瘴/雷泽）：回合末灼身，占气血上限%（已封顶 ≤envDmgPctCap，绝不秒杀）。可能致死→记为战败。
+        // ⑥ 地图词缀环境伤害（毒瘴/雷泽）：回合末灼身，占气血上限%。可能致死→记为战败。
         if (envDmg > 0 && pHp > 0) {
             pHp -= envDmg;
             events.push({ side: 'env', round, dmg: envDmg, text: envLabel, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
             if (pHp <= 0) break;
         }
+        // 敌·再生（回合末）：按最大气血回血，逼你提高 DPS / 速杀
+        if (eRegen > 0 && eHp > 0 && eHp < eMaxHp) {
+            const h = Math.floor(eMaxHp * eRegen / 100);
+            if (h > 0) { eHp = Math.min(eMaxHp, eHp + h); events.push({ side: 'eregen', round, heal: h, eHpPct: Math.max(0, (eHp / eMaxHp) * 100) }); }
+        }
         round++;
     }
 
     // enemyDead：敌人是否真被打死(用于 Boss——撑满回合"存活"不算击杀)。win 沿用旧义(玩家存活)，地图挂机不变。
-    // poisonDealt：本场中毒(毒修)累计真伤，供战斗日志显式呈现「中毒」事件（无毒修则为 0）。
-    // dodges/maxHit/dmgTaken/finalPHpPct：第四阶段策略向成就统计（闪避数/单次最高伤/累计受伤/终局血量%）。
-    return { win: pHp > 0, enemyDead: eHp <= 0, events, poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct: Math.max(0, (pHp / maxPHp) * 100) };
+    // remainingHp：玩家剩余气血（百世轮回节点战斗的持久血量池据此更新；负数夹到 0）。
+    // poisonDealt/dodges/maxHit/dmgTaken/finalPHpPct：策略向成就统计。
+    return { win: pHp > 0, enemyDead: eHp <= 0, events, remainingHp: Math.max(0, pHp), poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct: Math.max(0, (pHp / maxPHp) * 100) };
 }
 
 // 触发主动技时择招：取「有效倍率最高」的一门（power + level*scale）。

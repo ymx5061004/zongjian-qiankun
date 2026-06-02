@@ -4,12 +4,12 @@
 // 另含「加密导入导出」（文件末尾）：AES-GCM(固定密钥) 把存档导出为离线备份，
 // 仅作防篡改/防随手改档的混淆 —— 密钥就在前端源码里，非机密级保护。
 // ============================================================
-import { state, makeDefaultPlayer } from './state.js';
+import { state, makeDefaultPlayer, makeDefaultRun, makeDefaultRecords } from './state.js';
 import { SKILL_SUFFIXES, GEAR_SLOTS, PROFESSIONS } from './config.js';
 import { syncQuestProgress } from './domain.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
-const SAVE_VERSION = 6;                 // v4: quests(新手指引)；v5: cultivationPath(修行流派)；v6: 地图词缀计数。补全在 normalizePlayer，旧档不炸
+const SAVE_VERSION = 7;                 // v7: records历世记录（v6 地图词缀/黑市刷新 / v5 cultivationPath / v4 quests）；补全在 normalizePlayer，旧档不炸
 
 export function saveGame() {
     if (!state.player.name) return;
@@ -72,6 +72,44 @@ export function normalizePlayer(parsed) {
         if (p.totalKills > 0) qs.battleCount = p.totalKills;
         if (p.realmLevel > 1) qs.breakthroughCount = p.realmLevel - 1;
     }
+    // —— 百世轮回字段补全（v5 新增）：旧档无 run/legacies 时由默认对象兜底，这里逐项防御 ——
+    // run 整体覆盖了默认对象（v5 档），故对每个子字段做类型/范围兜底；老档(无 run)已由 makeDefaultRun 兜底。
+    if (!Array.isArray(p.legacies)) p.legacies = [];
+    if (!p.run || typeof p.run !== 'object') p.run = makeDefaultRun();
+    const dflt = makeDefaultRun();
+    const r = p.run;
+    if (!Number.isFinite(r.lifeNo) || r.lifeNo < 1) r.lifeNo = dflt.lifeNo;
+    if (!Number.isFinite(r.age) || r.age < 0) r.age = dflt.age;
+    if (!Number.isFinite(r.maxAge) || r.maxAge <= 0) r.maxAge = dflt.maxAge;
+    if (r.hp !== null && (!Number.isFinite(r.hp) || r.hp < 0)) r.hp = null; // null=控制层填满；非法→重置为满
+    if (!Number.isFinite(r.karma)) r.karma = 0;
+    if (!Number.isFinite(r.regionIndex) || r.regionIndex < 0) r.regionIndex = 0;
+    if (!Array.isArray(r.nodeMap)) r.nodeMap = [];
+    if (!Array.isArray(r.visitedNodes)) r.visitedNodes = [];
+    if (!Number.isFinite(r.nodesDone) || r.nodesDone < 0) r.nodesDone = 0;
+    if (!Number.isFinite(r.clearedBosses) || r.clearedBosses < 0) r.clearedBosses = 0;
+    if (!Number.isFinite(r.coinGained) || r.coinGained < 0) r.coinGained = 0;
+    if (!Number.isFinite(r.expGained) || r.expGained < 0) r.expGained = 0;
+    if (typeof r.selectedTactic !== 'string') r.selectedTactic = 'balanced';
+    if (r.lifepathId !== null && typeof r.lifepathId !== 'string') r.lifepathId = null;
+    if (!Array.isArray(r.runTalents)) r.runTalents = [];
+    if (!r.worldFlags || typeof r.worldFlags !== 'object') r.worldFlags = {};
+    if (typeof r.regionId !== 'string') r.regionId = null;
+    if (r.currentNodeId !== null && typeof r.currentNodeId !== 'string') r.currentNodeId = null;
+    // —— 黑市刷新计数补全（v6 新增）——
+    if (!p.shop || typeof p.shop !== 'object') p.shop = { refreshCount: 0, lastRefreshAt: 0 };
+    if (!Number.isFinite(p.shop.refreshCount) || p.shop.refreshCount < 0) p.shop.refreshCount = 0;
+    if (!Number.isFinite(p.shop.lastRefreshAt) || p.shop.lastRefreshAt < 0) p.shop.lastRefreshAt = 0;
+    // —— 历世记录补全（v7 新增）——
+    if (!p.records || typeof p.records !== 'object') p.records = makeDefaultRecords();
+    const rec = p.records, dr = makeDefaultRecords();
+    if (!Number.isFinite(rec.maxLifeNo) || rec.maxLifeNo < 1) rec.maxLifeNo = dr.maxLifeNo;
+    if (!Number.isFinite(rec.deepestRegion) || rec.deepestRegion < 0) rec.deepestRegion = 0;
+    if (!Number.isFinite(rec.bestScore) || rec.bestScore < 0) rec.bestScore = 0;
+    if (typeof rec.bestGrade !== 'string') rec.bestGrade = '-';
+    if (!Number.isFinite(rec.bossKills) || rec.bossKills < 0) rec.bossKills = 0;
+    if (!Number.isFinite(rec.ascensions) || rec.ascensions < 0) rec.ascensions = 0;
+    if (!Array.isArray(rec.talentsSeen)) rec.talentsSeen = [];
     // 静默基线同步：填好 completed[] 与 activeId（不弹提示），避免旧档首个动作触发「一次性补发」的提示风暴。
     syncQuestProgress(player);
     // —— 修行流派字段补全（v5 新增）：旧档无 path 字段 → 默认未择道(null)，保持原始数值、不强制选择 ——

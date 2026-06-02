@@ -5,7 +5,8 @@
 // ============================================================
 import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS, CULTIVATION_PATHS, CRAFT_AFFIXES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getGameplayAdvice, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById, getMapModifierBrief, getBossPlan, getPathRecommendations, getStageAssessment, getNextUnlock, materialSourceHint } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getGameplayAdvice, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById, getMapModifierBrief, getBossPlan, getPathRecommendations, getStageAssessment, getNextUnlock, materialSourceHint, shopRefreshCost, decayedRefreshSteps } from '../domain.js';
+import { getModifiers } from '../run.js';
 import { formatNumber } from '../util.js';
 import { renderAchievementPanel } from './achievement.js';
 
@@ -379,15 +380,20 @@ export function rollShopGoods() {
     // 黑市只卖「凡铁/精铁」低档基础套装件(前期启动用)——不再卖随机高档装、刷新也刷不出顶配，
     // 杜绝「刷钱→刷新→买顶装」。中后期装备靠自己打造/掉落(见打造图谱与后续掉落改造)。
     const slotPool = unlockedGearSlots(player.realmLevel); // 黑市只卖已解锁部位，避免买到装不了的件
+    // 命格/遗产「黑市折扣」(商贾命 / 黑市旧识)：进货即按折扣定价，购买/展示同源(下次刷新按当时折扣重算)。
+    const disc = getModifiers(player).shopDiscount || 0;
+    const cut = p => Math.max(1, Math.floor(p * (1 - disc)));
     for (let i = 0; i < 3; i++) {
         const lowTier = 1 + Math.floor(Math.random() * 2); // 1=凡铁 / 2=精铁
         const slot = slotPool[Math.floor(Math.random() * slotPool.length)].key;
-        shopGoods.push({ kind: 'item', obj: makeGearPiece(lowTier, slot, rollQuality()) });
+        const piece = makeGearPiece(lowTier, slot, rollQuality());
+        piece.price = cut(piece.price);
+        shopGoods.push({ kind: 'item', obj: piece });
     }
     for (let i = 0; i < skillCount; i++) {
-        // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/...），仅覆盖售价为固定 6000。
+        // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/...），仅覆盖售价为固定 6000（再按折扣）。
         const sk = generateSkillByMatrix(player.realmLevel);
-        sk.price = 6000;
+        sk.price = cut(6000);
         shopGoods.push({ kind: 'skill', obj: sk });
     }
     // 第五阶段·黑市应急材料（价偏高=4×回收价，应急补料用，不能取代采集）：低档矿石/草药
@@ -407,6 +413,9 @@ export function removeShopGood(idx) {
 export function renderShopGoods() {
     const box = document.getElementById('shop-goods-box');
     box.innerHTML = "";
+    // 刷新按钮动态价：连刷递增、随时间回落（见 actions.refreshShop / domain.shopRefreshCost）
+    const refreshBtn = document.querySelector('[data-act="refresh-shop"]');
+    if (refreshBtn) refreshBtn.textContent = `手动刷新 (${formatNumber(shopRefreshCost(decayedRefreshSteps(state.player.shop, Date.now())))}文)`;
     if (shopGoods.length === 0) {
         box.innerHTML = `<div class="list-card" style="justify-content:center; color:var(--text-muted);">— 黑市货已售罄，点上方「刷新」可重新进货 —</div>`;
         return;
@@ -1203,7 +1212,7 @@ export function renderGuide() {
     </tbody></table>
 
     <h3 id="sec-shop">⑨ 珍宝黑市</h3>
-    <p>黑市共 6 件货（3 装备 ＋ 3 普通秘籍，秘籍定价 6000 文）：<b>买走一件就少一件、其余不变</b>，切换页签也不会换货；想要整批新货，点【刷新】花 <b>${B.shopRefreshCost}</b> 文。有 <b>${B.shopHHChance * 100}%</b> 概率出<b style="color:var(--color-honghuang)">洪荒孤本《老区长混沌诀》</b>（售价 ${formatNumber(B.hhSkillPrice)} 文，此时普通货位减为 5 件）——孤本是开启「洪荒之力」乘区的关键，遇到务必抢购。</p>
+    <p>黑市共 6 件货（3 装备 ＋ 3 普通秘籍，秘籍定价 6000 文）：<b>买走一件就少一件、其余不变</b>，切换页签也不会换货；想要整批新货，点【刷新】重随机整架。<b>刷新费用连刷递增</b>（起步 ${B.shopRefresh.base} 文、每连刷一次 ×${B.shopRefresh.growth}），并随真实时间逐步回落——偶尔刷很便宜，连刷钓鱼则迅速变贵（杜绝低价无限刷新）。有 <b>${B.shopHHChance * 100}%</b> 概率出<b style="color:var(--color-honghuang)">洪荒孤本《老区长混沌诀》</b>（售价 ${formatNumber(B.hhSkillPrice)} 文，此时普通货位减为 5 件）——孤本是开启「洪荒之力」乘区的关键，遇到务必抢购。</p>
 
     <h3 id="sec-grow">⑩ 破境冲关 与 渡劫轮回</h3>
     <h4>破境冲关（线性成长）</h4>

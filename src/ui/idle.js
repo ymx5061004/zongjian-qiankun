@@ -7,6 +7,7 @@
 import { state } from '../state.js';
 import { BALANCE, ACTIVITIES, MATERIALS, PROFESSIONS } from '../config.js';
 import { levelFromExp, generateItemByMatrix, effDurationMs, bonusYieldChance } from '../domain.js';
+import { getModifiers } from '../run.js';
 import { renderProduction, renderWarehouse, renderBag, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
 import { toast, infoDialog } from './dialog.js';
@@ -57,8 +58,13 @@ function runOnce(act) {
     // 等级增产：本次有 bonusYieldChance 概率「产出翻倍」(熔炼则同矿出双锭=材料效率)
     const lv = levelFromExp(player.professions[act.prof].exp);
     const mult = (Math.random() < bonusYieldChance(lv)) ? 2 : 1;
+    // 命格/遗产 产出加成（矿脉感知·铁匠命 → 采矿；药王余泽·药灵根 → 采药）。
+    const mods = getModifiers(player);
+    let yieldMul = 1;
+    if (act.prof === 'mining') yieldMul += mods.mineYieldMult;
+    else if (act.prof === 'herb') yieldMul += mods.herbYieldMult;
     const yielded = {};
-    if (act.outputs) for (const [k, n] of Object.entries(act.outputs)) { const q = n * mult; addMaterial(player, k, q); yielded[k] = q; }
+    if (act.outputs) for (const [k, n] of Object.entries(act.outputs)) { const q = Math.max(1, Math.round(n * mult * yieldMul)); addMaterial(player, k, q); yielded[k] = q; }
     let item = null, soldCoin = 0;
     if (act.craftItem) {
         const gear = generateItemByMatrix(act.craftItem);

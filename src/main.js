@@ -26,6 +26,7 @@ import {
     exportSaveFile, importSaveFile, buyBagSlot, takePill,
     claimGuideQuestReward, recordShopVisit, selectCultivationPath, buyShopMaterial
 } from './actions.js';
+import { renderRunPage, beginRoguelite, enterNode, setTactic, manualRebirth, advanceRegionAction, ascendEnding, renderCodex } from './ui/run.js';
 
 // ---------- 角色创建 / 开场动画 / 进入游戏 ----------
 function finalizeCharacter() {
@@ -86,6 +87,7 @@ function initGameCore() {
     renderPlayerSkills();
     renderProduction();
     renderWarehouse();
+    renderRunPage();   // 百世轮回主页（默认首页）
     rollShopGoods();
     checkAchievementsAndNotify('all');
     renderAchievementPanel();
@@ -101,7 +103,14 @@ function onDelegatedClick(e) {
     switch (el.dataset.act) {
         case 'finalize-character': finalizeCharacter(); break;
         case 'enter-game': enterGame(); break;
-        case 'switch-page': switchPage(el.dataset.page, el); if (el.dataset.page === 'shop') recordShopVisit(); break;
+        case 'switch-page': switchPage(el.dataset.page, el); if (el.dataset.page === 'shop') recordShopVisit(); if (el.dataset.page === 'run') renderRunPage(); if (el.dataset.page === 'codex') renderCodex(); break;
+        // —— 百世轮回 ——
+        case 'roguelite-begin': beginRoguelite(); break;
+        case 'roguelite-node': enterNode(el.dataset.node); break;
+        case 'set-tactic': setTactic(el.dataset.tactic); break;
+        case 'roguelite-rebirth': manualRebirth(); break;
+        case 'roguelite-advance': advanceRegionAction(); break;
+        case 'roguelite-ascend': ascendEnding(); break;
         case 'toggle-menu': toggleMenu(); break;
         case 'close-menu': closeMenu(); break;
         case 'toggle-group': el.closest('.menu-group')?.classList.toggle('collapsed'); break;
