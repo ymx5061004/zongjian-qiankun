@@ -1123,6 +1123,7 @@ export function generateSkillByMatrix(realmLevel) {
 //   tactic / startHp / vsBonusPct / poisonMult —— Roguelite 节点战斗扩展
 //   env —— 地图词缀环境对象（百关征途地图词缀扩展）；也可直接把 env 对象作为 opts 传入（向后兼容）
 export function simulateBattle(stats, enemy, skills, opts = {}) {
+    opts = opts || {};   // 调用方传 null（如 resolveMapEnv 荒原返回 null）时恢复默认
     // 提取 env：支持两种调用约定 { env: {...} } 或直接把 env 对象作为第4参传入
     const env = opts.env || (opts.envDmgPctMaxHp != null || opts.enemyCritChance != null || opts.healMult != null ? opts : null);
     const B = BALANCE.battle;
