@@ -9,7 +9,7 @@ import { loadGame, saveGame } from './storage.js';
 import {
     initTooltipEvent, hideTooltip, switchPage,
     updatePlayerAttributes, renderForge, renderBag,
-    renderMapList, renderPlayerSkills, rollShopGoods,
+    renderMapList, renderPlayerSkills, rollShopGoods, initShopGoods,
     renderProduction, renderWarehouse, selectCraftTier, selectCraftAffix,
     toggleMenu, closeMenu
 } from './ui/render.js';
@@ -88,7 +88,7 @@ function initGameCore() {
     renderProduction();
     renderWarehouse();
     renderRunPage();   // 百世轮回主页（默认首页）
-    rollShopGoods();
+    initShopGoods();  // 有存档货架则恢复，否则随机生成（防页面刷新重摇）
     checkAchievementsAndNotify('all');
     renderAchievementPanel();
     setInterval(saveGame, 5000);

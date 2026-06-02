@@ -4,7 +4,8 @@
 // 世界标记 worldFlags / 寿元 age / 装备材料秘籍 / 流派倾向(tactic) / 后续事件条件(flag/require)。
 //
 // choice.effects 支持键（由 run.applyEventChoice 落地；item/skill 由 ui 控制器实体化以避免循环依赖）：
-//   atk/def/hp/crit/dodge : 「永久根骨」增量（写入 player.pillBonus，跨世保留、不被渡劫重置）
+//   stats                 : { atk/def/hp/crit/dodge } 「本世临时」属性（写入 run.tempBonus，轮回后清空）
+//   permStats             : { atk/def/hp/crit/dodge } 「永久根骨」（写入 player.pillBonus，跨世保留）—— 仅极少数稀有事件使用
 //   hpNow                 : 当前寿命气血 增减（+疗伤 / -受创；控制器据最大气血夹取，归零即陨落）
 //   coin/exp/honghuangPower: 碎银/修为/洪荒之力
 //   karma                 : 因果值增减（正向因果受命格/遗产 karmaGainMult 放大）
@@ -21,7 +22,7 @@ export const EVENTS = [
         id: 'sword_tomb_tablet', title: '剑冢残碑', regionTags: ['jianzhong'],
         desc: '荒草间露出半截断碑，碑文中隐有剑意流转，似在低声诵念某种剑诀。',
         choices: [
-            { text: '凝神参悟剑痕', effects: { atk: 6, karma: 1 }, resultText: '剑意入体，攻击根骨精进，却也沾染了一缕执念。' },
+            { text: '凝神参悟剑痕', effects: { stats: { atk: 5 }, permStats: { atk: 1 }, karma: 1 }, resultText: '剑意入体，根骨略有精进，今世攻势更盛，却也沾染了一缕执念。' },
             { text: '拓印碑文带走', effects: { material: { ore_xuan: 4 }, coin: 600 }, resultText: '你拓下碑文，顺手凿了几块碑基玄铁。' },
             { text: '叩首而过，不扰先贤', effects: { karma: -1, exp: 300 }, resultText: '心怀敬意，反得一丝明悟。' }
         ]
@@ -39,7 +40,7 @@ export const EVENTS = [
         id: 'drunk_tower', title: '醉仙楼', regionTags: ['qingzhou', 'yunmeng'],
         desc: '酒旗招展，楼里一位醉醺醺的老者拉你拼酒，说要传你「酒中剑意」。',
         choices: [
-            { text: '舍命陪君子，痛饮三百杯', effects: { hpNow: -50, atk: 4, dodge: 2, karma: -1 }, resultText: '醉里挑灯，老者抚掌大笑，临走点拨了你几手身法。' },
+            { text: '舍命陪君子，痛饮三百杯', effects: { hpNow: -50, stats: { atk: 4, dodge: 2 }, karma: -1 }, resultText: '醉里挑灯，老者抚掌大笑，临走点拨了你几手身法。' },
             { text: '付账结交', effects: { coin: -800, exp: 500, flag: { metDrunkMaster: true } }, resultText: '你结清酒钱，老者记下了你的名号。' },
             { text: '推辞离去', effects: {}, resultText: '你婉拒了邀约。' }
         ]
@@ -84,7 +85,7 @@ export const EVENTS = [
         desc: '一名盲眼卜者端坐泽畔：「客官印堂晦明不定，可愿一卜吉凶？」',
         choices: [
             { text: '卜问前程（耗银）', effects: { coin: -1000, exp: 1500, karma: -1 }, resultText: '卦象点醒迷津，你顿觉修为通达。' },
-            { text: '求一道护身符', effects: { hp: 40, flag: { hasTalisman: true } }, resultText: '卜者递来护身符，你只觉根骨厚实了几分。' },
+            { text: '求一道护身符', effects: { stats: { hp: 40 }, flag: { hasTalisman: true } }, resultText: '卜者递来护身符，你只觉今世体魄壮实了几分。' },
             { text: '一笑了之', effects: {}, resultText: '你不信命，扬长而去。' }
         ]
     },
@@ -92,7 +93,7 @@ export const EVENTS = [
         id: 'sword_spirit', title: '剑灵低语', regionTags: ['jianzhong'],
         desc: '一柄折剑悬浮半空，剑灵嘶哑发问：「凡人，可愿以血饲剑，承我剑道？」',
         choices: [
-            { text: '滴血认主', effects: { hpNow: -60, atk: 10, karma: 1, tactic: 'aggressive' }, resultText: '剑鸣龙吟，凶戾剑意灌体——你的杀招更盛了。' },
+            { text: '滴血认主', effects: { hpNow: -60, stats: { atk: 10 }, karma: 1, tactic: 'aggressive' }, resultText: '剑鸣龙吟，凶戾剑意灌体——你的杀招更盛了。' },
             { text: '以剑诀相易', effects: { skill: true }, resultText: '剑灵化作一道流光钻入你识海，留下一门剑诀。' },
             { text: '镇压邪剑', require: { minAtk: 60 }, effects: { karma: -2, material: { soul_crystal: 1 } }, resultText: '你以浩然之力镇住邪剑，得其剑魂凝成的结晶。' }
         ]
@@ -101,15 +102,15 @@ export const EVENTS = [
         id: 'test_stone', title: '试剑石', regionTags: ['jianzhong'],
         desc: '一方丈高的青石屹立道旁，石面布满深浅剑痕，传言可测剑者根骨。',
         choices: [
-            { text: '全力一剑', effects: { hpNow: -20, atk: 5, exp: 800 }, resultText: '一剑劈下，石屑纷飞，你对劲力的领悟更深。' },
-            { text: '以巧劲点石', effects: { dodge: 2, crit: 1 }, resultText: '四两拨千斤，你的身法与眼力都有所精进。' }
+            { text: '全力一剑', effects: { hpNow: -20, stats: { atk: 5 }, exp: 800 }, resultText: '一剑劈下，石屑纷飞，你对劲力的领悟更深。' },
+            { text: '以巧劲点石', effects: { stats: { dodge: 2, crit: 1 } }, resultText: '四两拨千斤，你的身法与眼力都有所精进。' }
         ]
     },
     {
         id: 'herb_king', title: '毒手药王庐', regionTags: ['wandu'],
         desc: '草庐中一位白须老者正在熬药，药香与毒气交织：「来得正好，替老夫试试这炉新丹。」',
         choices: [
-            { text: '吞服新丹', effects: { hpNow: -40, hp: 50, atk: 6, karma: 0 }, resultText: '丹入腹中翻江倒海，挺过之后筋骨竟脱胎换骨。' },
+            { text: '吞服新丹', effects: { hpNow: -40, stats: { hp: 40, atk: 5 }, permStats: { hp: 10 }, karma: 0 }, resultText: '丹入腹中翻江倒海，挺过之后筋骨略有蜕变——根底有所夯实。' },
             { text: '讨教炼毒之术', effects: { tactic: 'poison', material: { herb_2: 6 } }, resultText: '老者传你淬毒法门，你已偏向以毒制敌。' },
             { text: '婉拒，只买药材', effects: { coin: -600, material: { herb_3: 4 } }, resultText: '你买下几株珍稀药材便告辞。' }
         ]
@@ -126,7 +127,7 @@ export const EVENTS = [
         id: 'gu_master', title: '蛊师密室', regionTags: ['wandu'],
         desc: '幽暗石室里万蛊攒动，蛊师阴恻恻地盯着你：「献上一物，我便赐你蛊虫之力。」',
         choices: [
-            { text: '献血养蛊', effects: { hpNow: -70, atk: 8, karma: 2, tactic: 'poison' }, resultText: '蛊虫噬血，化为你体内的剧毒杀机。' },
+            { text: '献血养蛊', effects: { hpNow: -70, stats: { atk: 8 }, karma: 2, tactic: 'poison' }, resultText: '蛊虫噬血，化为你体内的剧毒杀机。' },
             { text: '以银钱交易', effects: { coin: -1500, skill: true }, resultText: '蛊师收下钱财，传你一门阴毒功法。' },
             { text: '焚毁蛊坛', require: { minAtk: 80 }, effects: { karma: -3, coin: 2000, exp: 1000 }, resultText: '你一掌震碎蛊坛，为江湖除一大害。' }
         ]
@@ -144,7 +145,7 @@ export const EVENTS = [
         id: 'heaven_stele', title: '镇魔石碑', regionTags: ['tianmen'],
         desc: '一座古老石碑镇压着滚滚魔气，碑上铭文殷红如血。',
         choices: [
-            { text: '注入真元加固封印', effects: { hpNow: -40, karma: -2, def: 8, flag: { sealedDemon: true } }, resultText: '你加固了封印，功德加身，根骨愈坚。' },
+            { text: '注入真元加固封印', effects: { hpNow: -40, karma: -2, stats: { def: 8 }, flag: { sealedDemon: true } }, resultText: '你加固了封印，功德加身，今世体魄愈坚。' },
             { text: '破碑取宝', effects: { karma: 4, item: { tier: 5 }, coin: 3000 }, resultText: '魔气冲天，你抢出一件神兵——代价是滔天因果。' }
         ]
     },
@@ -161,8 +162,8 @@ export const EVENTS = [
         id: 'wandering_swordsman', title: '挑战狂徒',
         desc: '一名狂傲剑客拦路:「听闻阁下小有名气，可敢与我一较高下？」',
         choices: [
-            { text: '应战（搏命）', effects: { hpNow: -90, atk: 7, exp: 1200, karma: 1 }, resultText: '一场恶斗险胜，你从生死间悟得杀伐之道。' },
-            { text: '以礼相待，切磋点到为止', effects: { exp: 600, dodge: 1 }, resultText: '点到为止，互有进益，结为好友。' },
+            { text: '应战（搏命）', effects: { hpNow: -90, stats: { atk: 7 }, exp: 1200, karma: 1 }, resultText: '一场恶斗险胜，你从生死间悟得杀伐之道。' },
+            { text: '以礼相待，切磋点到为止', effects: { exp: 600, stats: { dodge: 1 } }, resultText: '点到为止，互有进益，结为好友。' },
             { text: '花钱消灾', effects: { coin: -1000 }, resultText: '破财免灾，狂徒哂笑而去。' }
         ]
     },
@@ -179,7 +180,7 @@ export const EVENTS = [
         desc: '夜空一道流火坠落不远处，星陨之地往往蕴藏天材地宝。',
         choices: [
             { text: '抢先挖掘', effects: { hpNow: -30, material: { ore_star: 3 } }, resultText: '余温灼人，你撬下几块星陨精铁。' },
-            { text: '感悟星辰之力', effects: { crit: 2, exp: 1000 }, resultText: '星光入眼，你的洞察与暴起之机更敏锐了。' }
+            { text: '感悟星辰之力', effects: { stats: { crit: 2 }, exp: 1000 }, resultText: '星光入眼，你的洞察与暴起之机更敏锐了。' }
         ]
     },
     {
@@ -195,7 +196,7 @@ export const EVENTS = [
         id: 'karma_backlash', title: '因果反噬',
         desc: '夜半，你被无名心悸惊醒——往日所造业障似乎正在汇聚成形。',
         choices: [
-            { text: '以杀止杀，斩破心魔', require: { karmaMin: 5 }, effects: { hpNow: -100, atk: 12, karma: -3 }, resultText: '你在血与火中斩断心魔，杀意化作纯粹的力量。' },
+            { text: '以杀止杀，斩破心魔', require: { karmaMin: 5 }, effects: { hpNow: -100, stats: { atk: 12 }, karma: -3 }, resultText: '你在血与火中斩断心魔，杀意化作纯粹的力量。' },
             { text: '静坐忏悔，消解业力', effects: { exp: 800, karma: -4 }, resultText: '你诚心忏悔，业障消散了不少。' },
             { text: '放任自流', effects: { karma: 2 }, resultText: '你压下不安，业障却又添一分。' }
         ]
@@ -231,7 +232,7 @@ export const EVENTS = [
         choices: [
             { text: '焚香赎罪', require: { karmaMin: 5 }, effects: { karma: -5, hpNow: -30, exp: 600 }, resultText: '你长跪忏悔，血光渐敛，业力消解大半。' },
             { text: '广施阴德', effects: { coin: -1000, karma: -2 }, resultText: '散去部分钱财，结一段善缘。' },
-            { text: '我命由我，不惧因果', effects: { atk: 6, karma: 2 }, resultText: '你直面业镜，杀意愈纯，然因果更深。' }
+            { text: '我命由我，不惧因果', effects: { stats: { atk: 6 }, karma: 2 }, resultText: '你直面业镜，杀意愈纯，然因果更深。' }
         ]
     }
 ];

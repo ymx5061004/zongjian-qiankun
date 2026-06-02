@@ -73,7 +73,18 @@ export function getModifiersFor(lifepathId, legacies, runTalents) {
     const sources = [];
     const lp = LIFEPATH_MAP[lifepathId];
     if (lp && lp.mods) sources.push(lp.mods);
-    (legacies || []).forEach(id => { const lg = LEGACY_MAP[id]; if (lg && lg.mods) sources.push(lg.mods); });
+    // 遗产：统计层数；第一层用完整 mods，后续叠加用递减的 repeatModifiers（防属性膨胀）
+    const legacyCount = {};
+    (legacies || []).forEach(id => { legacyCount[id] = (legacyCount[id] || 0) + 1; });
+    Object.entries(legacyCount).forEach(([id, n]) => {
+        const lg = LEGACY_MAP[id];
+        if (!lg) return;
+        if (lg.mods) sources.push(lg.mods);
+        if (n > 1) {
+            const rep = lg.repeatModifiers || {};
+            if (Object.keys(rep).length) for (let i = 1; i < n; i++) sources.push(rep);
+        }
+    });
     const talents = runTalents || [];
     const schoolCount = {};
     talents.forEach(id => {
@@ -106,7 +117,7 @@ export function getModifiersFor(lifepathId, legacies, runTalents) {
 // 旧档/未入轮回的玩家：恒等修正，对原有玩法零影响。
 export function getModifiers(player) {
     const run = player && player.run ? player.run : null;
-    const m = getModifiersFor(run ? run.lifepathId : null, player ? player.legacies : [], run ? run.runTalents : []);
+    const m = getModifiersFor(run ? run.lifepathId : null, player ? (player.legacies || []) : [], run ? run.runTalents : []);
     // 因果·善缘庇佑：低因果(广积阴德)本世获得黑市折扣 + 奇遇收益加成。高因果的反噬体现在 Boss(见 finalizeNodeEnemy)。
     const K = BALANCE.roguelite.karma;
     if (run && Number.isFinite(run.karma) && run.karma <= K.lowThresh) {
@@ -129,14 +140,15 @@ function sampleN(pool, n) {
 export function rollLifepathChoices() {
     return sampleN(LIFEPATHS, 3).map(l => l.id);
 }
-// 轮回遗产 N 选 1：优先抽「尚未拥有」的（先广后深——先集齐 13 种，封顶早期属性膨胀且每世给新东西）；
-// 未拥有不足 N 时再用「已拥有」补足（此后才出现重复＝叠加，多见于高评价/集齐后的深局）。
+// 轮回遗产 N 选 1：优先抽「尚未拥有」的（先广后深）；其次抽「已拥有但未满层」的（递减叠加）；满层不出现。
 export function rollLegacyChoices(player, n = 3) {
     const owned = (player && Array.isArray(player.legacies)) ? player.legacies : [];
-    const unowned = LEGACIES.filter(l => !owned.includes(l.id));
-    const ownedPool = LEGACIES.filter(l => owned.includes(l.id));
+    const stackCount = {};
+    owned.forEach(id => { stackCount[id] = (stackCount[id] || 0) + 1; });
+    const unowned = LEGACIES.filter(l => !stackCount[l.id]);
+    const canRepeat = LEGACIES.filter(l => stackCount[l.id] && stackCount[l.id] < (l.maxStacks || 5));
     let pool = sampleN(unowned, n);
-    if (pool.length < n) pool = pool.concat(sampleN(ownedPool, n - pool.length));
+    if (pool.length < n) pool = pool.concat(sampleN(canRepeat, n - pool.length));
     return pool.map(l => l.id);
 }
 
@@ -262,10 +274,20 @@ export function startLife(player, lifepathId, { nextLife = false } = {}) {
         expGained: 0,
         selectedTactic: (player.run && player.run.selectedTactic) || 'balanced',
         lifepathId,
-        runTalents: [],                 // 预留：本世临时增益（二期）
-        worldFlags: {}
+        runTalents: [],
+        worldFlags: {},
+        tempBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }
     };
     player.run = run;
+    // 重置本世黑市计数（goods 清空、per-life 刷新次数/购书/购装归零）
+    if (!player.shop || typeof player.shop !== 'object') {
+        player.shop = { goods: [], refreshCount: 0, lastRefreshAt: 0, lifeRefreshCount: 0, booksBoughtThisLife: 0, gearBoughtThisLife: 0 };
+    } else {
+        player.shop.goods = [];
+        player.shop.lifeRefreshCount = 0;
+        player.shop.booksBoughtThisLife = 0;
+        player.shop.gearBoughtThisLife = 0;
+    }
     return run;
 }
 
@@ -281,10 +303,13 @@ export function advanceRegion(player) {
     return run;
 }
 
-// 追加一枚永久遗产（可重复 → 叠加）。
+// 追加一枚永久遗产；受 maxStacks 上限约束（rollLegacyChoices 已过滤，此处作最终保护）。
 export function grantLegacy(player, legacyId) {
     if (!LEGACY_MAP[legacyId]) return false;
     if (!Array.isArray(player.legacies)) player.legacies = [];
+    const lg = LEGACY_MAP[legacyId];
+    const current = player.legacies.filter(id => id === legacyId).length;
+    if (current >= (lg.maxStacks || 999)) return false;
     player.legacies.push(legacyId);
     return true;
 }
@@ -436,11 +461,39 @@ export function applyEventChoice(player, event, choice, maxHp) {
     const eff = choice.effects || {};
     const logs = [];
     if (!player.pillBonus) player.pillBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
+    if (!run.tempBonus) run.tempBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
 
-    // 永久根骨（写入 pillBonus，跨世保留、不被渡劫重置）
-    ['atk', 'def', 'hp', 'crit', 'dodge'].forEach(k => {
-        if (eff[k]) { player.pillBonus[k] = (player.pillBonus[k] || 0) + eff[k]; logs.push(`永久${labelStat(k)} ${eff[k] > 0 ? '+' : ''}${eff[k]}${pctSuffix(k)}`); }
-    });
+    const statKeys = ['atk', 'def', 'hp', 'crit', 'dodge'];
+
+    // 本世临时属性（stats → run.tempBonus，轮回后清空）
+    if (eff.stats) {
+        statKeys.forEach(k => {
+            if (eff.stats[k]) {
+                run.tempBonus[k] = (run.tempBonus[k] || 0) + eff.stats[k];
+                logs.push(`本世${labelStat(k)} ${eff.stats[k] > 0 ? '+' : ''}${eff.stats[k]}${pctSuffix(k)}`);
+            }
+        });
+    }
+
+    // 永久根骨（permStats → pillBonus，跨世保留；仅极少数稀有事件使用）
+    if (eff.permStats) {
+        statKeys.forEach(k => {
+            if (eff.permStats[k]) {
+                player.pillBonus[k] = (player.pillBonus[k] || 0) + eff.permStats[k];
+                logs.push(`永久${labelStat(k)} ${eff.permStats[k] > 0 ? '+' : ''}${eff.permStats[k]}${pctSuffix(k)}`);
+            }
+        });
+    }
+
+    // 向后兼容：旧版直接写 atk/def/hp/crit/dodge（现在统一视为本世临时属性）
+    if (!eff.stats && !eff.permStats) {
+        statKeys.forEach(k => {
+            if (eff[k]) {
+                run.tempBonus[k] = (run.tempBonus[k] || 0) + eff[k];
+                logs.push(`本世${labelStat(k)} ${eff[k] > 0 ? '+' : ''}${eff[k]}${pctSuffix(k)}`);
+            }
+        });
+    }
     // 当前气血
     let dead = false;
     if (eff.hpNow) {

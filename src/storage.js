@@ -96,10 +96,18 @@ export function normalizePlayer(parsed) {
     if (!r.worldFlags || typeof r.worldFlags !== 'object') r.worldFlags = {};
     if (typeof r.regionId !== 'string') r.regionId = null;
     if (r.currentNodeId !== null && typeof r.currentNodeId !== 'string') r.currentNodeId = null;
-    // —— 黑市刷新计数补全（v6 新增）——
-    if (!p.shop || typeof p.shop !== 'object') p.shop = { refreshCount: 0, lastRefreshAt: 0 };
+    // —— 黑市字段补全（v6 新增 refreshCount/lastRefreshAt；v8 新增 goods/lifeRefreshCount/booksBought/gearBought）——
+    if (!p.shop || typeof p.shop !== 'object') p.shop = { goods: [], refreshCount: 0, lastRefreshAt: 0, lifeRefreshCount: 0, booksBoughtThisLife: 0, gearBoughtThisLife: 0 };
+    if (!Array.isArray(p.shop.goods)) p.shop.goods = [];
     if (!Number.isFinite(p.shop.refreshCount) || p.shop.refreshCount < 0) p.shop.refreshCount = 0;
     if (!Number.isFinite(p.shop.lastRefreshAt) || p.shop.lastRefreshAt < 0) p.shop.lastRefreshAt = 0;
+    if (!Number.isFinite(p.shop.lifeRefreshCount) || p.shop.lifeRefreshCount < 0) p.shop.lifeRefreshCount = 0;
+    if (!Number.isFinite(p.shop.booksBoughtThisLife) || p.shop.booksBoughtThisLife < 0) p.shop.booksBoughtThisLife = 0;
+    if (!Number.isFinite(p.shop.gearBoughtThisLife) || p.shop.gearBoughtThisLife < 0) p.shop.gearBoughtThisLife = 0;
+    // run.tempBonus 补全（v8 新增）
+    if (p.run && typeof p.run === 'object' && (!p.run.tempBonus || typeof p.run.tempBonus !== 'object')) {
+        p.run.tempBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
+    }
     // —— 历世记录补全（v7 新增）——
     if (!p.records || typeof p.records !== 'object') p.records = makeDefaultRecords();
     const rec = p.records, dr = makeDefaultRecords();

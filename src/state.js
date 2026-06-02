@@ -15,7 +15,9 @@ export function makeDefaultRun() {
         regionId: null, regionIndex: 0,
         nodeMap: [], currentNodeId: null, visitedNodes: [],
         nodesDone: 0, clearedBosses: 0, coinGained: 0, expGained: 0,
-        selectedTactic: 'balanced', lifepathId: null, runTalents: [], worldFlags: {}
+        selectedTactic: 'balanced', lifepathId: null, runTalents: [], worldFlags: {},
+        // 本世临时属性加成（事件 stats 效果）；轮回时清空，不跨世保留
+        tempBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }
     };
 }
 
@@ -53,8 +55,8 @@ export function makeDefaultPlayer() {
         // —— 百世轮回 Roguelite ——
         run: makeDefaultRun(),  // 本世进行态（每世重建）
         legacies: [],           // 永久轮回遗产 id 列表（跨世累积，可重复＝叠加）
-        // —— 黑市手动刷新计数（费用递增+时间衰减；不入挂机，跨会话保留）——
-        shop: { refreshCount: 0, lastRefreshAt: 0 },
+        // —— 黑市货架 + 刷新状态（goods 存档，页面刷新不重摇；per-life 计数随 startLife 清空）——
+        shop: { goods: [], refreshCount: 0, lastRefreshAt: 0, lifeRefreshCount: 0, booksBoughtThisLife: 0, gearBoughtThisLife: 0 },
         // —— 历世记录（江湖录·元进度；跨世永久累积）——
         records: makeDefaultRecords()
     };

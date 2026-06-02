@@ -81,9 +81,23 @@ function applyPlan(player, plan, maxHp) {
 
 // 事件选项效果预览（短文案）。
 const STAT_LABEL = { hp: '气血', atk: '攻击', def: '防御', crit: '暴击', dodge: '闪避' };
+function statTag(k, v, prefix) {
+    return `${prefix}${STAT_LABEL[k]}${v > 0 ? '+' : ''}${v}${(k === 'crit' || k === 'dodge') ? '%' : ''}`;
+}
 function effectPreview(eff = {}) {
     const p = [];
-    ['atk', 'def', 'hp', 'crit', 'dodge'].forEach(k => { if (eff[k]) p.push(`永久${STAT_LABEL[k]}${eff[k] > 0 ? '+' : ''}${eff[k]}${(k === 'crit' || k === 'dodge') ? '%' : ''}`); });
+    // 本世临时属性（stats）
+    if (eff.stats) {
+        ['atk', 'def', 'hp', 'crit', 'dodge'].forEach(k => { if (eff.stats[k]) p.push(statTag(k, eff.stats[k], '本世')); });
+    }
+    // 永久根骨（permStats）
+    if (eff.permStats) {
+        ['atk', 'def', 'hp', 'crit', 'dodge'].forEach(k => { if (eff.permStats[k]) p.push(statTag(k, eff.permStats[k], '永久')); });
+    }
+    // 向后兼容：旧版直接写 atk/def/... 的事件（视为本世临时）
+    if (!eff.stats && !eff.permStats) {
+        ['atk', 'def', 'hp', 'crit', 'dodge'].forEach(k => { if (eff[k]) p.push(statTag(k, eff[k], '本世')); });
+    }
     if (eff.hpNow) p.push(`${eff.hpNow > 0 ? '疗伤+' : '受创'}${eff.hpNow}`);
     if (eff.coin) p.push(`碎银${eff.coin > 0 ? '+' : ''}${formatNumber(eff.coin)}`);
     if (eff.exp) p.push(`修为+${formatNumber(eff.exp)}`);
@@ -587,28 +601,60 @@ async function resolveShopNode(player, node) {
     const disc = mods.shopDiscount;
     const tier = currentRegion(player).tier;
     const slots = unlockedGearSlots(player.realmLevel);
-    const goods = [];
-    for (let i = 0; i < 3; i++) {
-        const piece = makeGearPiece(tier, pickArr(slots).key, rollQuality());
-        piece.price = Math.max(1, Math.floor(piece.price * (1 - disc)));
-        goods.push({ kind: 'item', obj: piece });
-    }
-    const sk = generateSkillByMatrix(player.realmLevel);
-    sk.price = Math.max(1, Math.floor(6000 * (1 - disc)));
-    goods.push({ kind: 'skill', obj: sk });
 
+    // 商品缓存：首次生成后存入 node.shopGoods，避免重入时重摇
+    if (!node.shopGoods) {
+        const itemTier = Math.min(2, tier); // 节点黑市装备 tier 上限 2，防止后期直接购买顶装
+        const goods = [];
+        for (let i = 0; i < 3; i++) {
+            const piece = makeGearPiece(itemTier, pickArr(slots).key, rollQuality());
+            piece.price = Math.max(1, Math.floor(piece.price * (1 - disc)));
+            goods.push({ kind: 'item', obj: piece });
+        }
+        // 秘籍：过滤已学会 / 背包已有同名（至多尝试 6 次，找不到则放行）
+        const learnedNames = new Set(player.skills.map(sk => sk.name));
+        const bagBookNames = new Set(player.bag.filter(it => it.type === 'book' && it.payload).map(it => it.payload.name));
+        let found = false;
+        for (let t = 0; t < 6; t++) {
+            const sk = generateSkillByMatrix(player.realmLevel);
+            if (!learnedNames.has(sk.name) && !bagBookNames.has(sk.name)) {
+                sk.price = Math.max(1, Math.floor(6000 * (1 - disc)));
+                goods.push({ kind: 'skill', obj: sk });
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            const sk = generateSkillByMatrix(player.realmLevel);
+            sk.price = Math.max(1, Math.floor(6000 * (1 - disc)));
+            goods.push({ kind: 'skill', obj: sk });
+        }
+        node.shopGoods = goods;
+    }
+
+    const goods = node.shopGoods;
+    const learnedNames = new Set(player.skills.map(sk => sk.name));
+    const bagBookNames = new Set(player.bag.filter(it => it.type === 'book' && it.payload).map(it => it.payload.name));
     const cards = goods.map((g, i) => {
         const price = g.obj.price;
-        const afford = player.coin >= price, full = player.bag.length >= player.bagMax;
+        const afford = player.coin >= price;
+        const full = player.bag.length >= player.bagMax;
         const name = g.kind === 'item' ? `[装备] ${g.obj.name}` : `[秘籍] ${g.obj.name}`;
         const desc = `${g.kind === 'item' ? gearStatStr(g.obj) : skillStr(g.obj)} · <b style="color:var(--color-gold)">${formatNumber(price)}文</b>`;
-        return { title: name, desc, value: i, disabled: (!afford || full), locked: full ? '行囊已满' : (!afford ? '银两不足' : null) };
+        let locked = null;
+        if (full) locked = '行囊已满';
+        else if (!afford) locked = '银两不足';
+        else if (g.kind === 'skill' && learnedNames.has(g.obj.name)) locked = '已修炼此秘籍';
+        else if (g.kind === 'skill' && bagBookNames.has(g.obj.name)) locked = '背包已有此秘籍';
+        return { title: name, desc, value: i, disabled: !!(locked), locked };
     });
     const idx = await chooseCard(`💰 黑市商人${disc > 0 ? `（享 ${Math.round(disc * 100)}% 折扣）` : ''}`, `行踪诡秘的商人摆开货摊（你有碎银 ${formatNumber(player.coin)} 文）。`, cards, { cancelLabel: '不买，离开' });
     if (idx === null || idx === undefined) return;
     const g = goods[idx];
     if (player.coin < g.obj.price) { toast('碎银不足。', 'error'); return; }
     if (player.bag.length >= player.bagMax) { toast('行囊已满。', 'error'); return; }
+    if (g.kind === 'skill' && learnedNames.has(g.obj.name)) { toast('已修炼此秘籍。', 'error'); return; }
+    if (g.kind === 'skill' && bagBookNames.has(g.obj.name)) { toast('背包已有此秘籍。', 'error'); return; }
     player.coin -= g.obj.price;
     if (g.kind === 'item') player.bag.push(g.obj);
     else player.bag.push({ id: 'bk_' + Date.now() + Math.random(), name: `秘籍·《${g.obj.name}》`, type: 'book', payload: g.obj, price: Math.floor(g.obj.price / 5) });

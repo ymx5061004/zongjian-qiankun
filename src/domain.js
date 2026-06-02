@@ -742,11 +742,13 @@ export function computeStats(player) {
 
     // 丹药永久增益(pillBonus)与基础值同层：攻防血吃轮回乘区(根骨厚→修炼放大)，暴击/闪避同 base 不乘
     const pill = player.pillBonus || {};
-    let calcHp = Math.floor((player.baseHp + (pill.hp || 0)) * rebornMult);
-    let calcAtk = Math.floor((player.baseAtk + (pill.atk || 0)) * rebornMult);
-    let calcDef = Math.floor((player.baseDef + (pill.def || 0)) * rebornMult);
-    let calcCrit = player.baseCrit + (pill.crit || 0);
-    let calcDodge = player.baseDodge + (pill.dodge || 0);
+    // 本世临时属性（tempBonus）：事件 stats 效果，不吃轮回乘区（临时机缘，非永久根骨），轮回后清零
+    const tmp = (player.run && player.run.tempBonus) || {};
+    let calcHp = Math.floor((player.baseHp + (pill.hp || 0)) * rebornMult) + (tmp.hp || 0);
+    let calcAtk = Math.floor((player.baseAtk + (pill.atk || 0)) * rebornMult) + (tmp.atk || 0);
+    let calcDef = Math.floor((player.baseDef + (pill.def || 0)) * rebornMult) + (tmp.def || 0);
+    let calcCrit = player.baseCrit + (pill.crit || 0) + (tmp.crit || 0);
+    let calcDodge = player.baseDodge + (pill.dodge || 0) + (tmp.dodge || 0);
 
     player.skills.forEach(sk => {
         if (sk.type === 'passive') {

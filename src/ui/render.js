@@ -353,9 +353,18 @@ export function renderMapList() {
     }
 }
 
-// ---------- 珍宝黑市（商品存数组，按索引购买，不再把 JSON 塞进 HTML）----------
-let shopGoods = []; // [{kind:'item'|'skill', obj}]
-export function getShopGood(idx) { return shopGoods[idx]; }
+// ---------- 珍宝黑市（商品存入 player.shop.goods，页面刷新不重摇；按索引购买）----------
+function ensureShop(player) {
+    if (!player.shop || typeof player.shop !== 'object') {
+        player.shop = { goods: [], refreshCount: 0, lastRefreshAt: 0, lifeRefreshCount: 0, booksBoughtThisLife: 0, gearBoughtThisLife: 0 };
+    }
+    if (!Array.isArray(player.shop.goods)) player.shop.goods = [];
+    return player.shop;
+}
+export function getShopGood(idx) {
+    const shop = ensureShop(state.player);
+    return shop.goods[idx] ?? null;
+}
 
 // 把对象序列化成可安全嵌入「单引号」HTML 属性(data-tip)的串。
 // 否则 desc 里的 style='...' 单引号会提前闭合属性，把 JSON 泄漏成可见文本（洪荒孤本即此症）。
@@ -364,23 +373,21 @@ function tipAttr(obj) {
     return JSON.stringify(obj).replace(/&/g, '&amp;').replace(/'/g, '&#39;');
 }
 
-// 进货：重随机生成整架商品。只在「启动」「付费手动刷新」时调用——切页/购买都不该换货。
-// 数据存模块级 shopGoods（不入存档），关游戏重开即一批新货。
+// 进货：重随机生成整架商品。只在「付费手动刷新」或「新世初次进入黑市」时调用——切页/购买都不该换货。
+// 数据存 player.shop.goods（入存档），页面刷新后货架保持不变。
 export function rollShopGoods() {
     const player = state.player;
-    shopGoods = [];
+    const shop = ensureShop(player);
+    shop.goods = [];
     if (Math.random() < BALANCE.shopHHChance) {
-        shopGoods.push({ kind: 'skill', obj: {
+        shop.goods.push({ kind: 'skill', obj: {
             id: "sk_honghuang_unique", name: "老区长混沌诀", type: "passive", level: 1, isHongHuang: true,
             desc: "远古老区长遗留的法则具现。<br><br><span style='color:var(--color-honghuang)'>【洪荒法则】</span>：本功法最高可修炼至 100 重！每研习精进一重，【老区长的洪荒之力】永久 +1%（即全身各项基础属性暴增 2%）。研习此神功需要极其庞大的天地造化修为！",
             price: BALANCE.hhSkillPrice
         } });
     }
-    const skillCount = shopGoods.length ? 2 : 3; // 出了孤本则普通货位 6→5（孤本占掉一个秘籍位）
-    // 黑市只卖「凡铁/精铁」低档基础套装件(前期启动用)——不再卖随机高档装、刷新也刷不出顶配，
-    // 杜绝「刷钱→刷新→买顶装」。中后期装备靠自己打造/掉落(见打造图谱与后续掉落改造)。
-    const slotPool = unlockedGearSlots(player.realmLevel); // 黑市只卖已解锁部位，避免买到装不了的件
-    // 命格/遗产「黑市折扣」(商贾命 / 黑市旧识)：进货即按折扣定价，购买/展示同源(下次刷新按当时折扣重算)。
+    // 黑市只卖「凡铁/精铁」低档基础套装件，不卖高阶毕业装
+    const slotPool = unlockedGearSlots(player.realmLevel);
     const disc = getModifiers(player).shopDiscount || 0;
     const cut = p => Math.max(1, Math.floor(p * (1 - disc)));
     for (let i = 0; i < 3; i++) {
@@ -388,36 +395,73 @@ export function rollShopGoods() {
         const slot = slotPool[Math.floor(Math.random() * slotPool.length)].key;
         const piece = makeGearPiece(lowTier, slot, rollQuality());
         piece.price = cut(piece.price);
-        shopGoods.push({ kind: 'item', obj: piece });
+        shop.goods.push({ kind: 'item', obj: piece });
     }
+    // 普通黑市秘籍：每世最多买 1 本，优先生成未学过/未在背包的
+    const skillCount = shop.goods.some(g => g.obj && g.obj.isHongHuang) ? 2 : 3;
+    const learnedNames = new Set(player.skills.map(sk => sk.name));
+    const bagBookNames = new Set(player.bag.filter(it => it.type === 'book' && it.payload).map(it => it.payload.name));
     for (let i = 0; i < skillCount; i++) {
-        // 复用 domain.generateSkillByMatrix 生成「完整」技能对象（含 power/healRate/...），仅覆盖售价为固定 6000（再按折扣）。
-        const sk = generateSkillByMatrix(player.realmLevel);
+        let sk = null;
+        for (let t = 0; t < 8; t++) {
+            const candidate = generateSkillByMatrix(player.realmLevel);
+            if (!learnedNames.has(candidate.name) && !bagBookNames.has(candidate.name)) { sk = candidate; break; }
+        }
+        if (!sk) sk = generateSkillByMatrix(player.realmLevel); // fallback
         sk.price = cut(6000);
-        shopGoods.push({ kind: 'skill', obj: sk });
+        shop.goods.push({ kind: 'skill', obj: sk });
     }
-    // 第五阶段·黑市应急材料（价偏高=4×回收价，应急补料用，不能取代采集）：低档矿石/草药
+    // 黑市应急材料（价偏高，应急补料用，不能取代采集）
     [{ key: 'ore_copper', qty: 20 }, { key: 'ore_iron', qty: 10 }, { key: 'herb_1', qty: 15 }].forEach(m => {
         const unit = MATERIALS[m.key] ? (MATERIALS[m.key].price || 10) : 10;
-        shopGoods.push({ kind: 'material', key: m.key, qty: m.qty, price: Math.round(unit * m.qty * 4) });
+        shop.goods.push({ kind: 'material', key: m.key, qty: m.qty, price: Math.round(unit * m.qty * 4) });
     });
     renderShopGoods();
 }
 
+// 初始化黑市（启动时调用）：若已有存档货架则直接渲染，否则随机生成。
+export function initShopGoods() {
+    const shop = ensureShop(state.player);
+    if (shop.goods.length) renderShopGoods();
+    else rollShopGoods();
+}
+
 // 买走一件后从货架移除（不重随机，保留其余）。控制层购买成功后调用，再 renderShopGoods。
 export function removeShopGood(idx) {
-    if (idx >= 0 && idx < shopGoods.length) shopGoods.splice(idx, 1);
+    const shop = ensureShop(state.player);
+    if (idx >= 0 && idx < shop.goods.length) shop.goods.splice(idx, 1);
 }
 
 // 纯渲染当前货架（切页 / 购买后调用，不重随机）。货架为空时提示去刷新。
 export function renderShopGoods() {
+    const player = state.player;
+    const shop = ensureShop(player);
+    const shopGoods = shop.goods;
     const box = document.getElementById('shop-goods-box');
     box.innerHTML = "";
-    // 刷新按钮动态价：连刷递增、随时间回落（见 actions.refreshShop / domain.shopRefreshCost）
+    // 本世刷新上限（基础 2 次 + 遗产「黑市旧识」每层 +1）
+    const lifeRefreshCount = shop.lifeRefreshCount || 0;
+    const maxRefresh = 2 + (player.legacies || []).filter(id => id === 'blackmarket').length;
+    const canRefresh = lifeRefreshCount < maxRefresh;
+    // 刷新按钮：动态价 + 本世次数提示
     const refreshBtn = document.querySelector('[data-act="refresh-shop"]');
-    if (refreshBtn) refreshBtn.textContent = `手动刷新 (${formatNumber(shopRefreshCost(decayedRefreshSteps(state.player.shop, Date.now())))}文)`;
+    if (refreshBtn) {
+        if (canRefresh) {
+            refreshBtn.textContent = `手动刷新 (${formatNumber(shopRefreshCost(decayedRefreshSteps(shop, Date.now())))}文) [${lifeRefreshCount}/${maxRefresh}]`;
+            refreshBtn.disabled = false;
+        } else {
+            refreshBtn.textContent = `本世刷新已达上限 (${lifeRefreshCount}/${maxRefresh})`;
+            refreshBtn.disabled = true;
+        }
+    }
+    // 本世购书状态
+    const booksBought = shop.booksBoughtThisLife || 0;
+    const bookLimit = 1;
+    const booksLimitReached = booksBought >= bookLimit;
+    const learnedNames = new Set(player.skills.map(sk => sk.name));
+    const bagBookNames = new Set(player.bag.filter(it => it.type === 'book' && it.payload).map(it => it.payload.name));
     if (shopGoods.length === 0) {
-        box.innerHTML = `<div class="list-card" style="justify-content:center; color:var(--text-muted);">— 黑市货已售罄，点上方「刷新」可重新进货 —</div>`;
+        box.innerHTML = `<div class="list-card" style="justify-content:center; color:var(--text-muted);">— 黑市货已售罄，${canRefresh ? '点上方「刷新」可重新进货' : '本世刷新次数已达上限'} —</div>`;
         return;
     }
     shopGoods.forEach((g, idx) => {
@@ -439,10 +483,27 @@ export function renderShopGoods() {
         } else {
             const sk = g.obj;
             const bookItem = { name: `秘籍·《${sk.name}》`, type: "book", payload: sk, price: sk.price };
-            card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong style="color:var(--color-gold);">📜 绝学《${sk.name}》 🔍</strong></span><button class="btn btn-success" data-act="buy-skill" data-idx="${idx}">购买 (${sk.price}文)</button>`;
+            const alreadyLearned = learnedNames.has(sk.name);
+            const inBag = bagBookNames.has(sk.name);
+            const skillBlocked = booksLimitReached || alreadyLearned || inBag;
+            const blockReason = alreadyLearned ? '已修炼' : (inBag ? '背包已有' : (booksLimitReached ? `本世限购${bookLimit}本` : ''));
+            const btnHtml = skillBlocked
+                ? `<button class="btn" disabled title="${blockReason}" style="opacity:.5;">购买 (${sk.price}文) <small>${blockReason}</small></button>`
+                : `<button class="btn btn-success" data-act="buy-skill" data-idx="${idx}">购买 (${sk.price}文)</button>`;
+            card.innerHTML = `<span data-tip='${tipAttr(bookItem)}' style="cursor:help;"><strong style="color:${skillBlocked ? 'var(--text-muted)' : 'var(--color-gold)'};">📜 绝学《${sk.name}》 🔍</strong></span>${btnHtml}`;
         }
         box.appendChild(card);
     });
+    // 购书状态提示
+    if (booksBought > 0) {
+        const note = document.createElement('div');
+        note.className = "list-card";
+        note.style.justifyContent = 'center';
+        note.style.color = 'var(--text-muted)';
+        note.style.fontSize = '12px';
+        note.textContent = `本世已购 ${booksBought}/${bookLimit} 本秘籍（轮回后重置）`;
+        box.appendChild(note);
+    }
 }
 
 // ---------- 黑市常驻：行囊扩容（梅尔沃 Bank Slot 式，不随刷新售罄）----------

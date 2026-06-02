@@ -177,8 +177,10 @@ export function buyShopItem(idx) {
     if (player.coin < itemObj.price) { toast("碎银不足！", 'error'); return; }
     if (player.bag.length >= player.bagMax) { toast("背包已满，可在本黑市「行囊扩容」加格。", 'error'); return; }
     player.coin -= itemObj.price;
+    if (!player.shop) player.shop = {};
+    player.shop.gearBoughtThisLife = (player.shop.gearBoughtThisLife || 0) + 1;
     player.bag.push(itemObj);
-    removeShopGood(idx);          // 只移除买走的这件，其余货保留（不再整架重随机）
+    removeShopGood(idx);
     hideTooltip();
     renderShopGoods();
     renderBag();
@@ -193,13 +195,24 @@ export function buyShopSkill(idx) {
     const skObj = good.obj;
     if (player.coin < skObj.price) { toast("银两不足。", 'error'); return; }
     if (player.bag.length >= player.bagMax) { toast("行囊已满，可在本黑市「行囊扩容」加格。", 'error'); return; }
+    // 洪荒孤本不受普通限制
+    if (!skObj.isHongHuang) {
+        const alreadyLearned = player.skills.some(sk => sk.name === skObj.name);
+        const inBag = player.bag.some(it => it.type === 'book' && it.payload && it.payload.name === skObj.name);
+        if (alreadyLearned) { toast('已修炼此秘籍，无需重复购买。', 'error'); return; }
+        if (inBag) { toast('行囊中已有此秘籍。', 'error'); return; }
+        const booksBought = (player.shop && player.shop.booksBoughtThisLife) || 0;
+        if (booksBought >= 1) { toast('本世已购入一本秘籍（轮回后重置）。', 'error'); return; }
+    }
     player.coin -= skObj.price;
+    if (!player.shop) player.shop = {};
+    if (!skObj.isHongHuang) player.shop.booksBoughtThisLife = (player.shop.booksBoughtThisLife || 0) + 1;
     player.bag.push({
         id: "bk_" + Date.now(),
         name: skObj.isHongHuang ? `禁忌秘籍·《${skObj.name}》` : `秘籍·《${skObj.name}》`,
         type: "book", payload: skObj, price: Math.floor(skObj.price / 5)
     });
-    removeShopGood(idx);          // 只移除买走的这件，其余货保留（不再整架重随机）
+    removeShopGood(idx);
     hideTooltip();
     renderShopGoods();
     renderBag();
@@ -207,23 +220,33 @@ export function buyShopSkill(idx) {
     saveGame();
 }
 
-// —— 黑市付费刷新：费用几何递增 + 随真实时间衰减（反「500 文无限刷新钓鱼」）。重随机整架货。——
+// —— 黑市付费刷新：费用几何递增 + 随真实时间衰减 + 本世次数上限（反无限刷秘籍）。——
 export function refreshShop() {
     const player = state.player;
-    if (!player.shop || typeof player.shop !== 'object') player.shop = { refreshCount: 0, lastRefreshAt: 0 };
+    if (!player.shop || typeof player.shop !== 'object') {
+        player.shop = { goods: [], refreshCount: 0, lastRefreshAt: 0, lifeRefreshCount: 0, booksBoughtThisLife: 0, gearBoughtThisLife: 0 };
+    }
+    // 本世刷新次数上限：基础 2 次，每层「黑市旧识」遗产 +1
+    const lifeRefreshCount = player.shop.lifeRefreshCount || 0;
+    const maxRefresh = 2 + (player.legacies || []).filter(id => id === 'blackmarket').length;
+    if (lifeRefreshCount >= maxRefresh) {
+        toast(`本世刷新次数已达上限（${maxRefresh} 次），下一世重置。`, 'error');
+        return;
+    }
     const now = Date.now();
-    const steps = decayedRefreshSteps(player.shop, now);  // 距上次刷新已衰减后的连刷步数
+    const steps = decayedRefreshSteps(player.shop, now);
     const cost = shopRefreshCost(steps);
     if (player.coin < cost) { toast(`刷新黑市需 ${formatNumber(cost)} 文碎银，碎银不足（连刷涨价，稍候片刻会回落）。`, 'error'); return; }
     player.coin -= cost;
     player.shop.refreshCount = Math.min(BALANCE.shopRefresh.maxStep, steps + 1);
     player.shop.lastRefreshAt = now;
+    player.shop.lifeRefreshCount = lifeRefreshCount + 1;
     rollShopGoods();
     hideTooltip();
     updatePlayerAttributes();
-    recordShopVisit(); // 指引「黑市问价」（幂等：进入黑市时通常已记录，此处刷新仅作兜底，不会重复计数）
+    recordShopVisit();
     saveGame();
-    toast(`已消耗 ${formatNumber(cost)} 文，黑市新进了一批货。`, 'success');
+    toast(`已消耗 ${formatNumber(cost)} 文，黑市新进了一批货（本世已刷新 ${player.shop.lifeRefreshCount}/${maxRefresh} 次）。`, 'success');
 }
 
 // —— 黑市常驻：花碎银买 1 格背包扩容（梅尔沃 Bank Slot 式，价随已扩次数几何递增）——
