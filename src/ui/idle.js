@@ -110,7 +110,13 @@ export function startActivity(id) {
         toast(`需【${profName}】${act.levelReq} 级才能进行「${act.name}」。`, 'error');
         return;
     }
-    if (!hasInputs(player, act)) { toast(`原料不足，无法开始「${act.name}」。`, 'error'); return; }
+    if (!hasInputs(player, act)) {
+        // 带解决方向：点名缺的料，指向上一环节(采矿/采药)备料。
+        const lack = Object.entries(act.inputs || {}).filter(([k, n]) => (player.materials[k] || 0) < n)
+            .map(([k, n]) => `${MATERIALS[k] ? MATERIALS[k].name : k}×${n}`).join('、');
+        toast(`原料不足，无法开始「${act.name}」：需 ${lack}。先去采矿/采药备料。`, 'error');
+        return;
+    }
 
     player.activity = id;
     startTimer(act);

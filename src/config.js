@@ -212,9 +212,13 @@ export const BALANCE = {
 
     reward: {
         coinBase: 50, coinPerMap: 30,
-        expBase: 40, expPerMap: 40,
+        // 修为前段抬高(40→55)、随关增速略增(40→44)：破境成本随境界线性涨，前期修为偏紧→到「轮回(20级)」太慢；
+        // 抬基数让前 15~20 分钟破境更顺、更快摸到首次轮回这个关键乘区(平滑 1~20 关)，但仍非「一键毕业」。
+        expBase: 55, expPerMap: 44,
         baseDrop: 0.20,               // 装备掉落率(掉「该区域档位」装备), 再乘 dropRate/100
-        oreDropMax: 2,                // 每场胜利必掉该区域矿石 1~oreDropMax 个(材料导向, 喂打造)
+        // 每胜必掉矿 1~oreDropMax：2→3(均值 1.5→2，+33%)。矿是打造/强化(主力变强轴)的唯一喂料，前期偏紧；
+        // 提产让装备/强化跟得上 1.5^关 的敌人曲线。在线≈3272矿/时仍 > 离线1200/时 → 不破坏「离线不超在线」。
+        oreDropMax: 3,
         loseCoinRate: 0.05            // 战败损失当前碎银比例
     },
 
@@ -251,7 +255,9 @@ export const BALANCE = {
     // —— 生产/挂机引擎（采矿·锻造…通用）——
     idle: {
         maxLevel: 99,                         // 生产技能等级上限
-        expC: 20, expP: 1.9,                  // 升级累计经验曲线: 到达 L 级所需累计经验 = expC*(L-1)^expP（调缓, 早期更快）
+        // 指数 1.9→1.85：低阶几乎不变(L2 仍 20 经验)，中高阶累计经验降 ~10~18%，让采矿/熔炼解锁高档(铁/玄铁…)
+        // 与打造高阶装备的等级门槛来得更顺(平滑「生产耗时过长」)，但不改早期手感、不让生产秒满级。
+        expC: 20, expP: 1.85,                 // 升级累计经验曲线: 到达 L 级所需累计经验 = expC*(L-1)^expP（调缓, 早期更快）
         offlineCapMs: 12 * 3600 * 1000,       // 离线最多结算 12 小时
         offlineReportMinMs: 60 * 1000,        // 离线提示门槛：离开≥此时长才弹「欢迎回来」(产出照常结算)，避免秒级切换刷屏；可调
         // —— 效率途径：练级本身让你「更快 + 偶尔双倍产出」(不只是解锁高档) ——
@@ -387,9 +393,9 @@ export const MATERIALS = {
     herb_2: { name: "九叶灵芝", icon: "🍀", price: 40 },
     herb_3: { name: "万年雪参", icon: "🌾", price: 120 },
     // —— 丹药（炼丹产出；带 pill 增益标记 → 不入物料仓库列表，改在炼丹页「丹房」服用，服后永久 +pillBonus）——
-    pill_atk1:  { name: "淬体丹", icon: "🔴", price: 0, pill: { atk: 8 } },
-    pill_hp1:   { name: "聚元丹", icon: "🟠", price: 0, pill: { hp: 50 } },
-    pill_def1:  { name: "玄龟丹", icon: "🟤", price: 0, pill: { def: 6 } },
+    pill_atk1:  { name: "淬体丹", icon: "🔴", price: 0, pill: { atk: 12 } },  // 8→12：早期炼丹收益偏弱(有意义的大还丹太晚)，小幅抬入门丹，使早期炼丹值得一试
+    pill_hp1:   { name: "聚元丹", icon: "🟠", price: 0, pill: { hp: 80 } },   // 50→80
+    pill_def1:  { name: "玄龟丹", icon: "🟤", price: 0, pill: { def: 10 } },  // 6→10
     pill_crit:  { name: "锐金丹", icon: "🟡", price: 0, pill: { crit: 1 } },
     pill_dodge: { name: "轻灵丹", icon: "🟢", price: 0, pill: { dodge: 1 } },
     pill_great: { name: "大还丹", icon: "🟣", price: 0, pill: { hp: 120, atk: 15, def: 10 } }
@@ -466,7 +472,7 @@ export const BOSSES = [
 
 // ============================================================
 // 新手指引任务链（江湖指引）：把「前 30 分钟该做什么」做成可领奖的目标系统。
-// 逐步引导玩家接触 战斗→装备→洪炉→突破→秘籍→黑市→采矿→炼丹→秘境→轮回 等核心系统。
+// 逐步引导玩家接触 战斗→装备→洪炉→突破→秘籍→黑市→采矿→熔炼→打造→强化→炼丹→秘境→轮回 等核心系统。
 // 每条 = 一个目标 + 奖励。进度判定/领取逻辑见 domain.js（纯函数），落地+UI 见 actions.js / render.js。
 //   type:    进度判定类型（domain.getQuestProgress 按此取值；新增类型在那里加一个 case 即可）；
 //   target:  目标值；
@@ -478,20 +484,23 @@ export const BOSSES = [
 // 进度判定尽量「从现有状态派生」（如已装备/已通关/已会秘籍数），这样旧档若早已满足条件会直接显示「可领取」，不会卡死。
 // ============================================================
 export const GUIDE_QUESTS = [
-    { id: 'q_battle',       order: 1,  type: 'battleCount',  target: 1,  title: '初入江湖', desc: '在「百关征途」挑战任意关卡，完成 1 次战斗。',               reward: { coins: 2000, exp: 200 },                          page: 'adventure', unlockHint: '左侧菜单 → 百关征途 → 点任意关卡【挑战】',            next: 'q_equip' },
+    { id: 'q_battle',       order: 1,  type: 'battleCount',  target: 1,  title: '初入江湖', desc: '在「百关征途」挑战任意关卡，完成 1 次战斗。',               reward: { coins: 2000, exp: 500 },                          page: 'adventure', unlockHint: '左侧菜单 → 百关征途 → 点任意关卡【挑战】',            next: 'q_equip' },
     { id: 'q_equip',        order: 2,  type: 'equipItem',    target: 1,  title: '夺得兵刃', desc: '在「行囊与洪炉」点击一件装备并【披挂上身】。',             reward: { coins: 3000, material: { ingot_copper: 4 } },     page: 'bag',       unlockHint: '行囊与洪炉 → 点背包里的装备 → 披挂上身',           next: 'q_map3' },
-    { id: 'q_map3',         order: 3,  type: 'clearMap',     target: 3,  title: '小试锋芒', desc: '一路挂机征战，通关到第 3 关。',                           reward: { coins: 3000, exp: 800 },                          page: 'adventure', unlockHint: '百关征途 → 挂机推进到第 3 关',                     next: 'q_forge' },
+    { id: 'q_map3',         order: 3,  type: 'clearMap',     target: 3,  title: '小试锋芒', desc: '一路挂机征战，通关到第 3 关。',                           reward: { coins: 3000, exp: 1500 },                         page: 'adventure', unlockHint: '百关征途 → 挂机推进到第 3 关',                     next: 'q_forge' },
     { id: 'q_forge',        order: 4,  type: 'forgeCount',   target: 1,  title: '天地洪炉', desc: '把两件物品投入「天地洪炉」融合 1 次。',                   reward: { coins: 5000 },                                    page: 'bag',       unlockHint: '行囊与洪炉 → 拖两件物品入炉 → 点【融合】',         next: 'q_breakthrough' },
     { id: 'q_breakthrough', order: 5,  type: 'breakthrough', target: 1,  title: '内息初成', desc: '在「修真命格」完成 1 次破境冲关（境界 +1）。',             reward: { exp: 1500 },                                      page: 'role',      unlockHint: '修真命格 → 破境冲关（需消耗修为）',               next: 'q_path' },
     { id: 'q_path',         order: 6,  type: 'choosePath',   target: 1,  title: '择道而行', desc: '在「修行流派」选择一门流派，确立你的长远成长方向。',         reward: { coins: 8000, exp: 1000 },                         page: 'path',      unlockHint: '左侧菜单 → 修行流派 → 选择一门流派（首次免费）',     next: 'q_skill' },
     { id: 'q_skill',        order: 7,  type: 'ownSkill',     target: 2,  title: '百修入门', desc: '除初始拳法外，再参悟或购买并学会 1 本秘籍。',             reward: { coins: 6000, exp: 1000 },                         page: 'kungfu',    unlockHint: '珍宝黑市买秘籍 → 行囊参悟，或「百修秘籍」一键参悟', next: 'q_shop' },
     { id: 'q_shop',         order: 8,  type: 'visitShop',    target: 1,  title: '黑市问价', desc: '进入或刷新一次「珍宝黑市」，看看有什么好货。',           reward: { coins: 5000 },                                    page: 'shop',      unlockHint: '左侧菜单 → 珍宝黑市',                             next: 'q_mine' },
-    { id: 'q_mine',         order: 9,  type: 'startMining',  target: 1,  title: '采矿试炼', desc: '到「采矿」开采矿石，或在战斗中拾得任意矿石。',           reward: { material: { ore_copper: 10 } },                   page: 'mining',    unlockHint: '生产经营 → 采矿 → 开采铜矿【开始】',              next: 'q_pill' },
-    { id: 'q_pill',         order: 10, type: 'getPill',      target: 1,  title: '炼药初识', desc: '采药并在「炼丹」炼出一炉丹药（或服用任意丹药）。',         reward: { statBonus: { hp: 50 } },                          page: 'alchemy',   unlockHint: '生产经营 → 采药 → 炼丹 → 丹房服用',              next: 'q_map10' },
-    { id: 'q_map10',        order: 11, type: 'clearMap',     target: 10, title: '斩妖问道', desc: '战力渐长，通关到第 10 关（亦可去秘境击败 Boss）。',       reward: { coins: 20000, exp: 3000 },                        page: 'adventure', unlockHint: '百关征途 → 推进到第 10 关；秘境可挑战 Boss',       next: 'q_dixing' },
-    { id: 'q_dixing',       order: 12, type: 'clearAffixStage', target: 1, title: '识地势', desc: '通关一处带「地势词缀」的关卡（每 5 关起便有词缀，留意地图上的地势标识）。', reward: { coins: 10000, exp: 1500 },       page: 'adventure', unlockHint: '百关征途 → 挑战第 5 关及以上的词缀关卡并取胜',     next: 'q_five' },
-    { id: 'q_five',         order: 13, type: 'questsDone',   target: 5,  title: '一日小成', desc: '累计达成 5 个新手指引任务。',                             reward: { coins: 30000, statBonus: { atk: 8, def: 6 } },    page: 'quest',     unlockHint: '继续完成上面的指引任务即可',                       next: 'q_reborn' },
-    { id: 'q_reborn',       order: 14, type: 'learnReborn',  target: 1,  title: '百世伏笔', desc: '了解「渡劫轮回」：境界达 20 级即可渡劫，重置境界换取全属性永久质变（不必现在就轮回）。', reward: { coins: 50000, exp: 10000 }, page: 'role', unlockHint: '修真命格 → 渡劫轮回（境界 ≥ 20 解锁）', next: null }
+    { id: 'q_mine',         order: 9,  type: 'startMining',  target: 1,  title: '采矿试炼', desc: '到「采矿」开采矿石，或在战斗中拾得任意矿石。',           reward: { material: { ore_copper: 10 } },                   page: 'mining',    unlockHint: '生产经营 → 采矿 → 开采铜矿【开始】',              next: 'q_smelt' },
+    { id: 'q_smelt',        order: 10, type: 'startSmelting', target: 1, title: '百炼成锭', desc: '在「锻造」把矿石熔炼成金属锭（2 矿石熔 1 锭，先去采矿备料）。', reward: { coins: 4000, material: { ingot_copper: 4 } },  page: 'smithing',  unlockHint: '生产经营 → 锻造 → 熔炼铜锭【开始】（需铜矿石）',    next: 'q_craft' },
+    { id: 'q_craft',        order: 11, type: 'craftCount',   target: 1,  title: '自铸神兵', desc: '用金属锭在「打造」亲手锻造一件命名装备（强度主轴=档位）。', reward: { coins: 8000, exp: 1500 },                       page: 'craft',     unlockHint: '生产经营 → 打造 → 选部位打造（耗锭 + 碎银）',      next: 'q_enhance' },
+    { id: 'q_enhance',      order: 12, type: 'enhanceCount', target: 1,  title: '千锤淬锋', desc: '在「强化」给已装备的神兵 +1（攻/防/血永久放大，黑市买不到）。', reward: { coins: 10000, statBonus: { atk: 5, def: 4 } }, page: 'enhance',   unlockHint: '生产经营 → 强化 → 选已装备的装备强化（耗锭 + 碎银）', next: 'q_pill' },
+    { id: 'q_pill',         order: 13, type: 'getPill',      target: 1,  title: '炼药初识', desc: '采药并在「炼丹」炼出一炉丹药（或服用任意丹药）。',         reward: { statBonus: { hp: 50 } },                          page: 'alchemy',   unlockHint: '生产经营 → 采药 → 炼丹 → 丹房服用',              next: 'q_map10' },
+    { id: 'q_map10',        order: 14, type: 'clearMap',     target: 10, title: '斩妖问道', desc: '战力渐长，通关到第 10 关（亦可去秘境击败 Boss）。',       reward: { coins: 20000, exp: 3000 },                        page: 'adventure', unlockHint: '百关征途 → 推进到第 10 关；秘境可挑战 Boss',       next: 'q_dixing' },
+    { id: 'q_dixing',       order: 15, type: 'clearAffixStage', target: 1, title: '识地势', desc: '通关一处带「地势词缀」的关卡（每 5 关起便有词缀，留意地图上的地势标识）。', reward: { coins: 10000, exp: 1500 },       page: 'adventure', unlockHint: '百关征途 → 挑战第 5 关及以上的词缀关卡并取胜',     next: 'q_five' },
+    { id: 'q_five',         order: 16, type: 'questsDone',   target: 5,  title: '一日小成', desc: '累计达成 5 个新手指引任务。',                             reward: { coins: 30000, statBonus: { atk: 8, def: 6 } },    page: 'quest',     unlockHint: '继续完成上面的指引任务即可',                       next: 'q_reborn' },
+    { id: 'q_reborn',       order: 17, type: 'learnReborn',  target: 1,  title: '百世伏笔', desc: '了解「渡劫轮回」：境界达 20 级即可渡劫，重置境界换取全属性永久质变（不必现在就轮回）。', reward: { coins: 50000, exp: 10000 }, page: 'role', unlockHint: '修真命格 → 渡劫轮回（境界 ≥ 20 解锁）', next: null }
 ];
 
 // ============================================================
@@ -518,17 +527,20 @@ export const CULTIVATION_PATHS = [
         recommendedStats: '攻击 · 暴击 · 暴击伤害',
         flavorText: '剑者，凶器也；一寸短一寸险，一剑快，天下惊。',
         bonuses: ['攻击 +8%', '暴击率 +3%', '暴击伤害 +10%'],
-        penalties: ['防御 -5%'],
-        mods: { mult: { atk: 8, def: -5 }, flat: { crit: 3, critDmg: 10 } }
+        // 防御惩罚 -5%→-3%：原惩罚在陡峭生存临界点过重，使剑修胜率反低于无流派；减税让进攻流可玩、仍保留「攻强守弱」定位。
+        penalties: ['防御 -3%'],
+        mods: { mult: { atk: 8, def: -3 }, flat: { crit: 3, critDmg: 10 } }
     },
     {
         id: 'body', name: '金身·体修', tags: ['气血', '防御', '坚毅'], unlockRealmLevel: 1,
         desc: '淬炼肉身如金似铁，血厚甲坚，最宜稳扎稳打、长久挂机；受击之际更有反震之力。',
         recommendedStats: '气血 · 防御 · 反震',
         flavorText: '千锤百炼此身躯，刀枪难入鬼神惊。',
-        bonuses: ['气血 +12%', '防御 +10%', '反震：受击反弹攻击 15%'],
+        // 平衡：原 +12%血/+10%防/15%反伤 在「敌人近乎一击」的生存临界点过强(第10/20关 ~99% 胜率，其余流派仅 ~60~78%)。
+        // 下调为 +8%血/+7%防/11%反伤：仍是最肉、最宜挂机的流派(胜率仍居首)，但降其绝对战力、收窄与其它道的差距。
+        bonuses: ['气血 +8%', '防御 +7%', '反震：受击反弹攻击 11%'],
         penalties: ['闪避 -3%'],
-        mods: { mult: { hp: 12, def: 10 }, flat: { dodge: -3, thornsPct: 15 } }
+        mods: { mult: { hp: 8, def: 7 }, flat: { dodge: -3, thornsPct: 11 } }
     },
     {
         id: 'poison', name: '毒龙·毒修', tags: ['暗器', '持续', '磨炼'], unlockRealmLevel: 5,
@@ -545,8 +557,9 @@ export const CULTIVATION_PATHS = [
         recommendedStats: '闪避 · 先手 · 灵巧',
         flavorText: '踏雪无痕，迎风一笑——敌未近身，我已三剑。',
         bonuses: ['闪避 +5%', '先发制人：前 2 回合增伤 +20%'],
-        penalties: ['气血 -8%'],
-        mods: { mult: { hp: -8 }, flat: { dodge: 5, openerBonus: 20 } }
+        // 气血惩罚 -8%→-6%：原惩罚在陡峭生存临界点过重，使身法胜率反低于无流派；减税让灵巧流可玩、仍保留「灵巧脆皮」定位。
+        penalties: ['气血 -6%'],
+        mods: { mult: { hp: -6 }, flat: { dodge: 5, openerBonus: 20 } }
     },
     {
         id: 'artisan', name: '百炼·器修', tags: ['装备', '强化', '打造'], unlockRealmLevel: 8,

@@ -4,7 +4,7 @@
 // ============================================================
 import {
     ITEM_PREFIXES, MATRIX_ITEMS, SKILL_SECTS, SKILL_SUFFIXES, REALMS, MAP_NAMES, BALANCE, GEAR_TIERS,
-    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS, CULTIVATION_PATHS, MAP_MODIFIERS, CRAFT_AFFIXES
+    COMBAT_AFFIX_KEYS, GEAR_SLOTS, ACHIEVEMENTS, GUIDE_QUESTS, MATERIALS, CULTIVATION_PATHS, MAP_MODIFIERS, CRAFT_AFFIXES, ACTIVITIES
 } from './config.js';
 const LEGENDARY_QUALITY = 5;
 
@@ -174,6 +174,11 @@ function pillBonusSum(player) {
     const pb = player.pillBonus || {};
     return ['hp', 'atk', 'def', 'crit', 'dodge'].reduce((s, k) => s + (Number.isFinite(pb[k]) ? pb[k] : 0), 0);
 }
+// 读「策略向成就」累计计数（craftCount/enhanceCount…）：打造/强化等动作早已在累计，指引直接复用 → 旧档零风险、做过即可领。
+function achStat(player, key) {
+    const s = player.achievements && player.achievements.stats;
+    return (s && Number.isFinite(s[key])) ? s[key] : 0;
+}
 
 // 单条任务进度：返回 { current, target, done, pct }。target 取自任务配置（≥1）。
 export function getQuestProgress(player, quest) {
@@ -190,6 +195,9 @@ export function getQuestProgress(player, quest) {
         case 'ownSkill':     cur = Array.isArray(player.skills) ? player.skills.length : 0; break;         // 已掌握秘籍数（初始 1 本）
         case 'visitShop':    cur = s.shopVisitCount || 0; break;                                           // 计数器（进入/刷新黑市 +1）
         case 'startMining':  cur = (((player.professions && player.professions.mining && player.professions.mining.exp) || 0) > 0 || ownsAnyOre(player)) ? 1 : 0; break;
+        case 'startSmelting':cur = (((player.professions && player.professions.smithing && player.professions.smithing.exp) || 0) > 0) ? 1 : 0; break; // smithing 经验仅由熔炼增长 → >0 即「已熔炼过」（旧档同理直接可领）
+        case 'craftCount':   cur = achStat(player, 'craftCount'); break;                                    // 「打造」累计件数（复用成就计数器，既有动作已累计，旧档已造过即可领）
+        case 'enhanceCount': cur = achStat(player, 'enhanceCount'); break;                                  // 「强化」累计次数（复用成就计数器）
         case 'getPill':      cur = (((player.professions && player.professions.alchemy && player.professions.alchemy.exp) || 0) > 0 || ownsAnyPill(player) || pillBonusSum(player) > 0) ? 1 : 0; break;
         case 'questsDone':   cur = countCompletedGuideQuests(player, quest.id); break;                     // 已达成的其它任务数
         case 'choosePath':   cur = player.cultivationPath ? 1 : 0; break;                                  // 已选择任意修行流派
@@ -266,6 +274,377 @@ export function claimGuideQuestReward(player, questId) {
     player.quests.claimed.push(questId);
     syncQuestProgress(player); // 领取后推进 activeId 到下一条
     return { ok: true, reward };
+}
+
+// ============================================================
+// 「下一步建议」(getGameplayAdvice)——纯函数：据当前 player 给出最多 4 条可执行建议，
+// 用于「江湖指引」页顶部的卡关反馈。只读、不碰 DOM、不存档（与 getQuestProgress 同为纯逻辑）。
+//   返回数组，每条 { priority, key, icon, text, page? }；按 priority 升序取前 ADVICE_CAP 条。
+//   覆盖：可领指引奖励 / 背包满 / 当前关卡危险 / 可突破 / 未择流派 / 缺材料 / 可采矿·熔炼·打造·强化。
+//   判定尽量从既有状态派生；危险度用 simulateBattle 抽样估胜率（try/catch 兜底，异常则跳过该条）。
+// ============================================================
+const ADVICE_CAP = 4;
+
+// 抽样估算「对指定敌人」的胜率（纯：多次 simulateBattle 取胜场比例）。失败/异常返回 null。
+// 同时服务关卡(finalizeEnemyStats)与 Boss(finalizeBossStats)——只要传进来的 enemy 有 maxHp/atk/def 即可。
+function estimateWinRateVs(player, enemy, env = null, samples = 5) {
+    try {
+        const { stats } = computeStats(player);
+        const skills = Array.isArray(player.skills) ? player.skills : [];
+        let win = 0;
+        for (let i = 0; i < samples; i++) if (simulateBattle(stats, enemy, skills, env).win) win++;
+        return win / samples;
+    } catch (e) {
+        return null;
+    }
+}
+// 关卡胜率（薄封装：补上该关的敌人与词缀环境）。
+function estimateWinRate(player, mapId, samples = 5) {
+    try {
+        return estimateWinRateVs(player, finalizeEnemyStats(mapId), resolveMapEnv(mapId, player), samples);
+    } catch (e) { return null; }
+}
+
+// —— 战斗「缺口」诊断（纯·只读）：判断面对某敌人时是「输出不足/生存不足/势均/无碍」，供建议与流派/Boss 联动。 ——
+// 胜负规则是「撑满回合存活 或 击杀」，故生存是主导维度；这里用解析式回合数(方向性，忽略暴击/技能/闪避)给出倾向，
+// 危险度则用 estimateWinRateVs 的抽样胜率。enemy 同时适配关卡与 Boss。返回 { winRate, deficit, danger, roundsToKill, roundsToDie }。
+function diagnoseCombat(player, enemy, env = null, samples = 5) {
+    try {
+        const { stats } = computeStats(player);
+        const cap = BALANCE.battle.maxRounds;
+        const winRate = estimateWinRateVs(player, enemy, env, samples);
+        const pDmg = Math.max(1, Math.floor((stats.atk || 0) - (enemy.def || 0)));   // 玩家每回合近似实伤
+        const eDmg = Math.max(1, Math.floor((enemy.atk || 0) - (stats.def || 0)));   // 受击每回合近似实伤
+        const roundsToKill = Math.ceil((enemy.maxHp || 1) / pDmg);
+        const roundsToDie = Math.ceil((stats.hp || 1) / eDmg);
+        let deficit;
+        if (winRate != null && winRate >= 0.85) deficit = 'none';
+        else if (roundsToDie > cap) deficit = 'none';            // 能撑满回合 → 稳胜
+        else if (roundsToKill > cap) deficit = 'survival';       // 回合内杀不掉 → 只能堆生存熬到收场
+        else if (roundsToKill <= roundsToDie) deficit = 'attack';// 能在回合内先杀掉 → 推输出锁定击杀
+        else deficit = 'balanced';                               // 略早于击杀阵亡 → 两端皆可
+        let danger;
+        if (winRate == null) danger = 'unknown';
+        else if (winRate >= 0.7) danger = 'safe';
+        else if (winRate >= 0.35) danger = 'risky';
+        else danger = 'deadly';
+        return { winRate, deficit, danger, roundsToKill, roundsToDie };
+    } catch (e) {
+        return { winRate: null, deficit: 'unknown', danger: 'unknown', roundsToKill: 0, roundsToDie: 0 };
+    }
+}
+
+// 进攻/生存部位划分（强化建议按战斗缺口择件：输出不足强兵刃、生存不足强防具）。
+const ATTACK_SLOTS = ['weapon', 'subweapon'];
+const SURVIVE_SLOTS = ['armor', 'helm', 'ring', 'artifact', 'amulet', 'boots', 'gloves'];
+
+// 生产侧建议：在「强化已装备神兵 / 缺料去采矿熔炼 / 打造装备」之间挑最有价值的，避免互相重复刷屏。
+// deficit（可选 'attack'|'survival'）：卡关缺口 → 优先建议对症部位（兵刃/防具），实现「卡关→生产」联动。
+function addProductionAdvice(player, add, deficit) {
+    const materials = (player.materials && typeof player.materials === 'object') ? player.materials : {};
+    const coin = player.coin || 0;
+    let added = false; // 是否已给出「明确可做的一步」——决定要不要再补兜底的「去备料」
+
+    // (a) 强化：扫已装备、还能继续强化的件。按缺口优先「对症部位」(输出→兵刃 / 生存→防具)，其内再挑下一级碎银最低者。
+    const equips = (player.equips && typeof player.equips === 'object') ? player.equips : {};
+    const preferSlots = deficit === 'attack' ? ATTACK_SLOTS : (deficit === 'survival' ? SURVIVE_SLOTS : null);
+    let bestPref = null, bestAny = null;
+    for (const slot of Object.keys(equips)) {
+        const item = equips[slot];
+        if (!item) continue;
+        const cost = enhanceCost(item);
+        if (!cost) continue; // 已满级
+        const haveIngot = materials[cost.ingotKey] || 0;
+        const lackIngot = haveIngot < cost.ingotQty;
+        const affordable = !lackIngot && coin >= cost.coin;
+        const cand = { slot, item, cost, haveIngot, lackIngot, affordable };
+        if (!bestAny || cost.coin < bestAny.cost.coin) bestAny = cand;
+        if (preferSlots && preferSlots.includes(slot) && (!bestPref || cost.coin < bestPref.cost.coin)) bestPref = cand;
+    }
+    const best = bestPref || bestAny;
+    if (best) {
+        const { item, cost, haveIngot, lackIngot, affordable } = best;
+        const ingotName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
+        const tag = bestPref ? (deficit === 'attack' ? '输出不足 → 强兵刃：' : '生存不足 → 强防具：') : '';
+        if (affordable) {
+            add(60, 'enhance', '⚒️', `${tag}可强化【${item.name}】→ +${cost.targetLevel}（耗 ${ingotName}×${cost.ingotQty} + 碎银 ${cost.coin}），攻/防/血永久放大。`, 'enhance');
+            added = true;
+        } else if (lackIngot) {
+            add(62, 'lackmat', '⛏️', `${tag}强化【${item.name}】缺「${ingotName}」（需 ${cost.ingotQty}、现有 ${haveIngot}）：去「采矿」开采、「锻造」熔炼成锭。`, 'mining');
+            added = true;
+        }
+    }
+
+    // (b) 打造：锻造等级解锁的最高可造档，若材料齐备则提示去打造一件（爬装备阶梯）。
+    const smExp = (player.professions && player.professions.smithing && player.professions.smithing.exp) || 0;
+    const smLv = levelFromExp(smExp);
+    for (let t = MAX_CRAFTABLE_TIER; t >= 1; t--) {
+        const T = GEAR_TIERS[t - 1];
+        if (!T || T.craftable === false || smLv < T.smithingReq) continue;
+        const have = materials[T.ingot] || 0;
+        if (have >= T.ingotQty && coin >= T.coin) {
+            const ingotName = MATERIALS[T.ingot] ? MATERIALS[T.ingot].name : T.ingot;
+            add(66, 'craft', '🛡️', `材料齐备，可在「打造」锻造【${T.name}】装备（耗 ${ingotName}×${T.ingotQty} + 碎银 ${T.coin}）。`, 'craft');
+            added = true;
+        }
+        break; // 只看最高可造档，给一条即可
+    }
+
+    // (c) 兜底：上面都没有「现成可做的一步」、又没在挂机、且矿石/锭储备很少 → 去采矿熔炼备料。
+    if (!added && !player.activity) {
+        const stock = Object.keys(materials).reduce((n, k) => n + ((k.startsWith('ore_') || k.startsWith('ingot_')) ? (materials[k] || 0) : 0), 0);
+        if (stock < 6) add(80, 'produce', '⛏️', `矿石与锭储备不足：去「采矿」开采、「锻造」熔炼成锭，为打造与强化备料（可挂机）。`, 'mining');
+    }
+}
+
+export function getGameplayAdvice(player) {
+    if (!player || typeof player !== 'object') return [];
+    const out = [];
+    const add = (priority, key, icon, text, page) => out.push({ priority, key, icon, text, page });
+
+    // —— 1. 可领取指引奖励（免费到手，最优先）——
+    const claimed = (player.quests && Array.isArray(player.quests.claimed)) ? player.quests.claimed : [];
+    const claimable = GUIDE_QUESTS.filter(q => !claimed.includes(q.id) && getQuestProgress(player, q).done);
+    if (claimable.length) add(10, 'claim', '🎁', `有 ${claimable.length} 个指引奖励可领取（如「${claimable[0].title}」），记得在下方领取。`);
+
+    // —— 2. 背包已满（再战掉落会丢失）——
+    const bag = Array.isArray(player.bag) ? player.bag : [];
+    const bagMax = Number.isFinite(player.bagMax) ? player.bagMax : 16;
+    if (bag.length >= bagMax) add(20, 'bagfull', '🎒', `行囊已满（${bag.length}/${bagMax}）：清理行囊或去「珍宝黑市」扩容，否则战斗掉落会丢失。`, 'shop');
+
+    // —— 3. 当前关卡危险（卡关核心反馈）：诊断「下一关」缺口，胜率过低则给「对症」战力建议（联动生产）——
+    const cleared = Number.isFinite(player.maxMapCleared) ? player.maxMapCleared : 0;
+    let frontierDeficit = null;
+    if (cleared >= 1 && cleared < MAP_NAMES.length) {
+        const frontier = cleared + 1;
+        const diag = diagnoseCombat(player, finalizeEnemyStats(frontier), resolveMapEnv(frontier, player));
+        if (diag.winRate != null && diag.winRate < 0.45) {
+            frontierDeficit = diag.deficit;
+            const fix = diag.deficit === 'attack' ? '输出不足 → 强化/打造兵刃、升攻击秘籍(真卷/杀诀)'
+                : diag.deficit === 'survival' ? '生存不足 → 强化防具、炼气血(聚元丹)/防御(玄龟丹)丹'
+                : '提升战力：破境 / 强化 / 打造';
+            add(30, 'danger', '⚠️', `推进到第 ${frontier} 关偏凶险（试算胜率约 ${Math.round(diag.winRate * 100)}%）→ ${fix}；或回低关稳健刷资源。`, 'adventure');
+        }
+    }
+
+    // —— 4. 可突破（修为已足，立竿见影的战力）——
+    const needExp = (player.realmLevel || 1) * BALANCE.breakthrough.costPerLevel;
+    if ((player.exp || 0) >= needExp) add(40, 'breakthrough', '📈', `修为已足（${Math.floor(player.exp || 0)}/${needExp}），可在「修真命格」破境冲关，全属性提升。`, 'role');
+
+    // —— 5. 尚未择道（首次免费的长期成长选择；打过至少一场再提示，不打扰首战）——
+    const battleCount = (player.quests && player.quests.stats && player.quests.stats.battleCount) || 0;
+    if (!player.cultivationPath && (battleCount >= 1 || cleared >= 1)) add(50, 'path', '☯️', `尚未择道：去「修行流派」选一门确立成长方向（首次免费，影响长远强度）。`, 'path');
+
+    // —— 6/7. 生产侧：可强化 / 缺材料 / 可打造 / 去采矿熔炼（按卡关缺口对症择件）——
+    addProductionAdvice(player, add, frontierDeficit);
+
+    return out.sort((a, b) => a.priority - b.priority).slice(0, ADVICE_CAP);
+}
+
+// ============================================================
+// 中期深度·联动（纯函数，只读不碰 DOM）：地图词缀说明 / Boss 目标化 / 流派适配评价。
+// 一律「复用」既有逻辑（getMapModifier·resolveMapEnv·getMapRewardMods·finalizeBossStats·diagnoseCombat），
+// 不复制第二套规则；落地+UI 在 render.js / actions.js。
+// ============================================================
+
+// —— 一、地图词缀说明：把词缀的「风险/奖励/应对/宜流派」从既有解析函数派生成可读条目（不再硬列数据）——
+export function getMapModifierBrief(mapId, player = null) {
+    const { mod, isElite } = getMapModifier(mapId);
+    const env = resolveMapEnv(mapId, player);     // 战斗环境（已封顶）；荒原→null
+    const rmod = getMapRewardMods(mapId);          // 奖励修正（已封顶）
+    const risk = [], reward = [], advice = [];
+    // 风险：全部来自 resolveMapEnv 解析出的战斗环境字段
+    if (env) {
+        if (env.envDmgPctMaxHp) risk.push(`每回合「${env.label || '环境'}」损失约 ${env.envDmgPctMaxHp}% 气血上限`);
+        if (env.enemyCritChance) risk.push(`守卫暴击率 ${env.enemyCritChance}%（暴击 ×${env.enemyCritMult}）`);
+        if (env.dodgeReduction) risk.push(`闪避被压制 -${env.dodgeReduction} 点`);
+        if (env.healMult != null && env.healMult < 1) risk.push(`回血/吸血降至 ${Math.round(env.healMult * 100)}%`);
+    }
+    if (isElite) risk.push('精英关：词缀强度提升');
+    if (!risk.length) risk.push('无额外凶险');
+    // 奖励：全部来自 getMapRewardMods
+    if (rmod.expMult > 1) reward.push(`修为 +${Math.round((rmod.expMult - 1) * 100)}%`);
+    if (rmod.gearDropMult > 1) reward.push(`装备掉率 ×${rmod.gearDropMult.toFixed(2)}`);
+    if (rmod.gearDropMult < 1) reward.push(`装备掉率 ×${rmod.gearDropMult.toFixed(2)}（偏少）`);
+    if (rmod.weaponBias) reward.push('掉落偏向兵刃/暗器');
+    if (rmod.herbDropChance) reward.push('概率掉药材（喂炼丹）');
+    if (rmod.skillDropChance) reward.push('概率掉秘籍');
+    if (!reward.length) reward.push('常规收益');
+    // 应对：由风险字段 + 契合流派派生
+    const fitPaths = (mod.preferredPaths || []).map(pid => { const p = getPathById(pid); return p ? p.name : pid; });
+    if (env && env.envDmgPctMaxHp) advice.push('带厚血/回血或减伤，别被环境磨死');
+    if (env && env.enemyCritChance) advice.push('堆气血/防御抗暴，或速杀求快');
+    if (env && env.dodgeReduction) advice.push('别依赖闪避，靠血厚甲坚硬抗');
+    if (env && env.healMult != null && env.healMult < 1) advice.push('回血被削，靠高输出速杀或反伤');
+    if (fitPaths.length) advice.push(`流派契合：${fitPaths.join('/')}`);
+    if (!advice.length) advice.push('常规推进即可');
+    return { modId: mod.id, name: mod.name, icon: mod.icon, tone: mod.tone, isElite, isWildland: mod.id === 'wildland', risk, reward, advice, fitPaths };
+}
+
+// —— 二、Boss 目标化：解锁条件 / 掉落用途 / 胜算·危险等级 / 对症准备 / 推荐先通关卡 ——
+function bossPrepHints(diag) {
+    const def = diag.deficit;
+    const hints = [];
+    if (def === 'none') { hints.push('战力大体够：保险起见先把主战装备强化 1~2 级再上。'); return hints; }
+    if (def === 'attack' || def === 'balanced') hints.push('输出不足 → 强化/打造兵刃·暗器，升攻击系秘籍(真卷/杀诀)，或转剑修/毒修。');
+    if (def === 'survival' || def === 'balanced') hints.push('生存不足 → 强化防具/法宝，炼聚元丹(气血)·玄龟丹(防御)，或转体修。');
+    if (def === 'unknown') hints.push('先把主战装备强化几级、炼几炉根骨丹，再来试。');
+    hints.push('质变手段：把玄晶档装备「神兵进阶」到神话/仙器（需先攒神魂结晶）。');
+    return hints;
+}
+export function getBossPlan(player, boss) {
+    const unlocked = (player.realmLevel || 1) >= boss.realmReq;
+    const diag = diagnoseCombat(player, finalizeBossStats(boss), null);
+    const cleared = player.maxMapCleared || 0;
+    const recStage = boss.mapEquiv;
+    const topTier = GEAR_TIERS[MAX_CRAFTABLE_TIER - 1];
+    return {
+        bossId: boss.id, name: boss.name, unlocked,
+        unlockText: `境界达 ${getRealmName(boss.realmReq)}（${boss.realmReq} 级）`,
+        dropUse: `💎神魂结晶 ×${boss.crystalMin}~${boss.crystalMax} → 用于「神兵进阶」把 ${topTier.name}档 突破到 神话/仙器（打造造不出的档）；另得碎银 ${boss.coin}`,
+        danger: unlocked ? diag.danger : 'locked',
+        winRate: unlocked ? diag.winRate : null,
+        deficit: diag.deficit,
+        recommendedClearStage: recStage,
+        clearedEnough: cleared >= recStage,
+        stageHint: cleared >= recStage
+            ? `你已通到第 ${cleared} 关（≥推荐第 ${recStage} 关），战力大体够。`
+            : `建议先通到第 ${recStage} 关左右积累战力，再来挑战。`,
+        prep: bossPrepHints(diag)
+    };
+}
+
+// —— 三、流派适配评价：据玩家当前装备/属性/材料/卡点，给每派 推荐度 + 理由 + 短板 + 适配方向（不替玩家选）——
+// 每派一份「画像」(适配缺口 / 装备词条 / 丹药 / 秘籍 / 生产方向)，与游戏既有内容对齐（CRAFT_AFFIXES/丹药/秘籍后缀）。
+const PATH_FIT = {
+    sword:   { serves: 'attack',   affix: '锋锐(暴击)',     pills: '锐金丹(暴击)',           skills: '真卷(攻·暴击)/杀诀(暴伤)', production: '打造·强化兵刃' },
+    body:    { serves: 'survival', affix: '坚铠(防/血)',    pills: '聚元丹(气血)·玄龟丹(防御)', skills: '心法(防·闪)/护体诀(减伤)', production: '强化防具/护符' },
+    poison:  { serves: 'attack',   affix: '淬毒(暗器)',     pills: '锐金丹(暴击)',           skills: '血刃(流血)/噬血术(吸血)',   production: '打造暗器 + 采药炼丹' },
+    agility: { serves: 'survival', affix: '轻灵(闪避)',     pills: '轻灵丹(闪避)',           skills: '心法(闪避)/疾风式(先发)',   production: '强化轻甲' },
+    artisan: { serves: 'both',     affix: '精工(升成色)',   pills: '大还丹(全能)',           skills: '(器修弱化被动秘籍收益)',     production: '主打 打造/强化（放大装备）' }
+};
+// 玩家当前「战斗倾向」信号：用于流派契合打分（抽样仅在 diagnoseCombat 内发生一次）。
+function buildSignals(player) {
+    let stats = {};
+    try { stats = computeStats(player).stats || {}; } catch (e) { stats = {}; }
+    const equips = (player.equips && typeof player.equips === 'object') ? player.equips : {};
+    const enhanceTotal = Object.values(equips).reduce((n, it) => n + (it ? (it.enhance || 0) : 0), 0);
+    const frontier = Math.min(MAP_NAMES.length, (player.maxMapCleared || 0) + 1);
+    const diag = (player.maxMapCleared || 0) >= 1
+        ? diagnoseCombat(player, finalizeEnemyStats(frontier), resolveMapEnv(frontier, player))
+        : { deficit: 'none', danger: 'safe' };
+    const smExp = (player.professions && player.professions.smithing && player.professions.smithing.exp) || 0;
+    return {
+        crit: stats.crit || 0, dodge: stats.dodge || 0,
+        hasSub: !!equips.subweapon, enhanceTotal, smithingLv: levelFromExp(smExp),
+        deficit: diag.deficit, danger: diag.danger
+    };
+}
+export function explainPathFit(player, path, signals = null) {
+    const prof = PATH_FIT[path.id] || {};
+    const sig = signals || buildSignals(player);
+    const unlocked = isPathUnlocked(player, path);
+    const isCurrent = player.cultivationPath === path.id;
+    let score = 1; // 0=low 1=medium 2+=high
+    const reasons = [], shortfalls = [];
+
+    // (1) 是否对症当前卡关缺口（仅在确有卡点时计入，避免对舒适期玩家瞎打分）
+    if (sig.danger && sig.danger !== 'safe' && sig.deficit !== 'none' && sig.deficit !== 'unknown') {
+        if (prof.serves === sig.deficit || prof.serves === 'both') { score++; reasons.push(sig.deficit === 'survival' ? '当前生存吃紧，此道补生存最对症' : '当前输出不足，此道补输出最对症'); }
+        else if (prof.serves === 'attack' || prof.serves === 'survival') { score--; shortfalls.push(sig.deficit === 'survival' ? '偏进攻，但你当前更缺生存' : '偏生存，但你当前更缺输出'); }
+    }
+    // (2) 与当前 build 的契合 / 短板
+    if (path.id === 'sword') { if (sig.crit >= 10) { score++; reasons.push('暴击已起步，剑修放大爆发'); } else shortfalls.push('暴击偏低：配暴击装/锐金丹/真卷秘籍'); }
+    if (path.id === 'poison') { if (sig.hasSub) reasons.push('已装暗器，毒修加成可吃满'); else { score = Math.max(0, score - 1); shortfalls.push('未装暗器：毒修需暗器 + 采药炼丹'); } }
+    if (path.id === 'agility') { if (sig.dodge >= 10) { score++; reasons.push('闪避已有基础，身法更灵动'); } else shortfalls.push('闪避偏低：配闪避装/轻灵丹'); }
+    if (path.id === 'body') reasons.push('血厚甲坚，最稳、最宜长时间挂机');
+    if (path.id === 'artisan') { if (sig.enhanceTotal >= 3 || sig.smithingLv >= 12) { score++; reasons.push('你已投入装备/锻造，器修以器养道收益高'); } else shortfalls.push('器修需配合打造/强化投入才显威'); }
+    // (3) 未解锁提示（不参与高低分，只作短板提醒）
+    if (!unlocked) shortfalls.unshift(`未解锁：需${getRealmName(path.unlockRealmLevel)}`);
+
+    const fit = score >= 2 ? 'high' : (score <= 0 ? 'low' : 'medium');
+    return {
+        pathId: path.id, name: path.name, unlocked, isCurrent, fit,
+        reason: reasons.length ? reasons.join('；') : '通用可选，按你想要的风格来',
+        shortfall: shortfalls.length ? shortfalls.join('；') : '无明显短板',
+        direction: `装备词条「${prof.affix || '—'}」 · 丹药「${prof.pills || '—'}」 · 秘籍「${prof.skills || '—'}」 · 生产「${prof.production || '—'}」`
+    };
+}
+export function getPathRecommendations(player) {
+    if (!player || typeof player !== 'object') return [];
+    const sig = buildSignals(player);   // 抽样仅一次，五派共用，避免重复跑战斗
+    return CULTIVATION_PATHS.map(p => explainPathFit(player, p, sig));
+}
+
+// ============================================================
+// UI 信息表达·只读派生（纯函数）：敌我评估 / 生产下一解锁 / 材料来源指引。
+// 复用既有逻辑（finalizeEnemyStats·computeStats·diagnoseCombat·getMapModifierBrief·levelFromExp·expForLevel），
+// 仅把「数据」算好交给 render；不拼复杂 HTML、不改任何数值。
+// ============================================================
+
+// 据战斗缺口给「变强方向」短句（敌我评估/失败提示共用，措辞与生产/流派联动一致）。
+function deficitFixHints(deficit) {
+    if (deficit === 'attack') return ['强化/打造兵刃·暗器', '升攻击系秘籍(真卷/杀诀)', '或转剑修/毒修'];
+    if (deficit === 'survival') return ['强化防具/法宝', '炼聚元丹(气血)·玄龟丹(防御)', '或转体修'];
+    if (deficit === 'balanced') return ['强化主战装备', '炼根骨丹', '或破境提升境界'];
+    if (deficit === 'none') return ['战力充裕，放心推进'];
+    return ['强化装备 / 炼丹 / 破境'];
+}
+
+// —— 冒险页「敌我评估」：当前关卡敌人属性 + 我方属性 + 危险等级 + 词缀风险 + 变强建议（全部复用既有纯函数）——
+export function getStageAssessment(player, mapId) {
+    const id = Math.max(1, Math.min(MAP_NAMES.length, mapId || 1));
+    const enemy = finalizeEnemyStats(id);
+    let ps = {};
+    try { ps = computeStats(player).stats || {}; } catch (e) { ps = {}; }
+    const env = resolveMapEnv(id, player);
+    const diag = diagnoseCombat(player, enemy, env);
+    return {
+        mapId: id, name: MAP_NAMES[id - 1] || '神秘禁区',
+        enemy: { hp: enemy.maxHp, atk: enemy.atk, def: enemy.def },
+        me: { hp: ps.hp || 0, atk: ps.atk || 0, def: ps.def || 0, crit: ps.crit || 0, dodge: ps.dodge || 0 },
+        winRate: diag.winRate, danger: diag.danger, deficit: diag.deficit,
+        mod: getMapModifierBrief(id, player),
+        fixHints: deficitFixHints(diag.deficit)
+    };
+}
+
+// —— 生产页「下一解锁」：当前等级 / 距下一级经验 / 下一个解锁动作 / 当前活动产出（按 prof）——
+function activityOutputText(a) {
+    if (!a) return '';
+    if (a.outputs) return Object.entries(a.outputs).map(([k, n]) => `${MATERIALS[k] ? MATERIALS[k].name : k}×${n}`).join('、');
+    if (a.craftItem) return '随机神兵→行囊';
+    return '';
+}
+export function getNextUnlock(player, prof) {
+    const exp = (player.professions && player.professions[prof]) ? (player.professions[prof].exp || 0) : 0;
+    const lv = levelFromExp(exp);
+    const max = BALANCE.idle.maxLevel;
+    const curBase = expForLevel(lv), nextBase = expForLevel(lv + 1);
+    const acts = ACTIVITIES.filter(a => a.prof === prof);
+    const next = acts.filter(a => a.levelReq > lv).sort((a, b) => a.levelReq - b.levelReq)[0] || null;
+    const curAct = player.activity ? acts.find(a => a.id === player.activity) || null : null; // 仅当全局活动属于本技能才显示
+    return {
+        level: lv, atMax: lv >= max,
+        expInLevel: Math.max(0, exp - curBase), expSpan: Math.max(1, nextBase - curBase),
+        toNext: lv >= max ? 0 : Math.max(0, nextBase - exp),
+        nextUnlock: next ? { name: next.name, levelReq: next.levelReq, output: activityOutputText(next) } : null,
+        current: curAct ? { name: curAct.name, output: activityOutputText(curAct) } : null
+    };
+}
+
+// —— 材料「去哪获得」指引：打造/强化「材料缺口」提示用（按 key 前缀派生，复用 GEAR_TIERS 的 矿↔锭 对应）——
+export function materialSourceHint(key) {
+    if (!key) return '';
+    if (key.startsWith('ore_')) return '去「采矿」开采';
+    if (key.startsWith('ingot_')) {
+        const tier = GEAR_TIERS.find(t => t.ingot === key);
+        const ore = tier && MATERIALS[tier.ore] ? MATERIALS[tier.ore].name : '对应矿石';
+        return `去「采矿」挖${ore}、再「锻造」熔炼`;
+    }
+    if (key.startsWith('herb_')) return '去「采药」采集';
+    if (key === 'soul_crystal') return '去「秘境」击败 Boss';
+    return '去生产页获取';
 }
 
 // —— 生产技能经验曲线（纯函数）——

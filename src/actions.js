@@ -4,7 +4,7 @@
 // ============================================================
 import { state } from './state.js';
 import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES, GEAR_SLOTS } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost, getCraftAffixById, applyCraftAffix } from './domain.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost, getCraftAffixById, applyCraftAffix, getBossPlan, materialSourceHint } from './domain.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
@@ -452,7 +452,13 @@ export function challengeBoss(bossId) {
     if (player.realmLevel < boss.realmReq) { toast(`境界不足，挑战【${boss.name}】需 ${getRealmName(boss.realmReq)}。`, 'error'); return; }
     const stats = computeStats(player).stats;
     const { enemyDead } = simulateBattle(stats, finalizeBossStats(boss), player.skills);
-    if (!enemyDead) { toast(`不敌【${boss.name}】！再砥砺战力(强化/进阶/轮回)后来战。`, 'error'); return; }
+    if (!enemyDead) {
+        // 有指导性的失败提示：复用 getBossPlan 给「推荐先通关卡 + 对症准备(强化/炼丹/流派)」，而非只说不敌。
+        const plan = getBossPlan(player, boss);
+        const tip = (plan.prep && plan.prep.length) ? plan.prep[0] : '强化装备 / 炼制根骨丹 / 提升流派适配后再来。';
+        toast(`不敌【${boss.name}】！${plan.stageHint}${tip}`, 'error');
+        return;
+    }
     const crystal = boss.crystalMin + Math.floor(Math.random() * (boss.crystalMax - boss.crystalMin + 1));
     player.materials.soul_crystal = (player.materials.soul_crystal || 0) + crystal;
     gainCoin(player, boss.coin, 'coin');
@@ -502,8 +508,8 @@ export function craftGear(tier, slot, affixId = 'none') {
     const needIngot = cost.ingotQty + (affix.extraIngot || 0);          // 副词条额外耗同档锭（与强化/打造共用产能=选择成本）
     const have = player.materials[cost.ingotKey] || 0;
     const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
-    if (have < needIngot) { toast(`${matName}不足：需 ${needIngot}${affix.extraIngot ? `（含「${affix.name}」+${affix.extraIngot}）` : ''}，现有 ${have}。`, 'error'); return; }
-    if (player.coin < cost.coin) { toast(`碎银不足：打造需 ${cost.coin} 文。`, 'error'); return; }
+    if (have < needIngot) { toast(`${matName}不足：需 ${needIngot}${affix.extraIngot ? `（含「${affix.name}」+${affix.extraIngot}）` : ''}，现有 ${have}。${materialSourceHint(cost.ingotKey)}。`, 'error'); return; }
+    if (player.coin < cost.coin) { toast(`碎银不足：打造需 ${formatNumber(cost.coin)} 文。多打几关或卖闲置物料换银。`, 'error'); return; }
 
     player.materials[cost.ingotKey] -= needIngot;
     if (player.materials[cost.ingotKey] <= 0) delete player.materials[cost.ingotKey];
@@ -523,6 +529,7 @@ export function craftGear(tier, slot, affixId = 'none') {
     renderBag();
     updatePlayerAttributes();
     checkAchievementsAndNotify('all');                                  // 打造类成就检测（千锤百炼/手气不错）
+    maybeUpdateQuestProgress();                                         // 指引「自铸神兵」（从 achievements.stats.craftCount 派生，无需 statDelta）
     saveGame();
     toast(`🛡️ 打造成功：【${piece.name}】（${QUALITY_NAMES[q]}成色）！`, 'success');
 }
@@ -568,6 +575,7 @@ export function enhanceEquip(slot) {
     renderEnhance();
     updatePlayerAttributes();   // 重算战力(强化已反映到 computeStats)+刷新顶栏碎银/装备名+N
     checkAchievementsAndNotify('all');     // 强化类成就检测（神兵微芒）
+    maybeUpdateQuestProgress();            // 指引「千锤淬锋」（从 achievements.stats.enhanceCount 派生）
     saveGame();
     toast(`⚒️ 强化成功！【${item.name}】精炼至 +${item.enhance}。`, 'success');
 }

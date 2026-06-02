@@ -5,7 +5,7 @@
 // ============================================================
 import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS, CULTIVATION_PATHS, CRAFT_AFFIXES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getGameplayAdvice, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById, getMapModifierBrief, getBossPlan, getPathRecommendations, getStageAssessment, getNextUnlock, materialSourceHint } from '../domain.js';
 import { formatNumber } from '../util.js';
 import { renderAchievementPanel } from './achievement.js';
 
@@ -298,8 +298,34 @@ export function updatePlayerAttributes() {
 }
 
 // ---------- 百关征途列表 ----------
+// 危险等级 → 标签+配色（敌我评估 / Boss 共用风格）。
+const DANGER_BADGE = {
+    safe: ['🟢 安全', 'var(--color-success)'], risky: ['🟡 有风险', 'var(--color-gold)'],
+    deadly: ['🔴 凶险', 'var(--color-accent)'], unknown: ['⚪ 未知', 'var(--text-muted)']
+};
+// 冒险页「敌我评估」：当前(挂机)关或前沿关的 敌我属性 / 危险等级 / 词缀风险 / 变强建议。复用 getStageAssessment 纯函数。
+function renderCombatAssessment(player) {
+    const box = document.getElementById('combat-assessment');
+    if (!box) return;
+    const targetMap = player.currentMapId || Math.min(100, (player.maxMapCleared || 0) + 1);
+    const a = getStageAssessment(player, targetMap);
+    const [dl, dc] = DANGER_BADGE[a.danger] || DANGER_BADGE.unknown;
+    const wr = a.winRate != null ? `（胜率约 ${Math.round(a.winRate * 100)}%）` : '';
+    const riskLine = a.mod.isWildland ? '' : `<div class="act-meta" style="color:${a.mod.tone};">${a.mod.icon} 词缀风险：${a.mod.risk.join('、')}</div>`;
+    box.innerHTML = `<div class="act-card" style="margin-bottom:0;">
+        <div class="act-head"><span class="act-title">⚔️ 敌我评估 · 第${a.mapId}关 ${a.name}</span><span style="color:${dc};font-weight:bold;white-space:nowrap;">${dl}${wr}</span></div>
+        <div class="act-meta" style="display:flex;flex-wrap:wrap;gap:2px 14px;">
+            <span>👹 敌　血 ${formatNumber(a.enemy.hp)} · 攻 ${formatNumber(a.enemy.atk)} · 防 ${formatNumber(a.enemy.def)}</span>
+            <span>🧍 我　血 ${formatNumber(a.me.hp)} · 攻 ${formatNumber(a.me.atk)} · 防 ${formatNumber(a.me.def)} · 暴 ${a.me.crit}% · 闪 ${a.me.dodge}%</span>
+        </div>
+        ${riskLine}
+        <div class="act-meta" style="color:#8fb8e0;">💪 变强建议：${a.fixHints.join(' · ')}</div>
+    </div>`;
+}
+
 export function renderMapList() {
     const player = state.player;
+    renderCombatAssessment(player);   // 顶部敌我评估
     const box = document.getElementById('map-list-box');
     box.innerHTML = "";
     for (let i = 1; i <= 100; i++) {
@@ -313,8 +339,14 @@ export function renderMapList() {
         const { mod, isElite } = getMapModifier(i);
         const isDefaultMod = mod.id === 'wildland';
         const modLabel = isDefaultMod ? '' : ` · <span style="color:${mod.tone};">${mod.icon}${mod.name}${isElite ? '·精英' : ''}</span>`;
-        const prefPaths = (mod.preferredPaths || []).map(pid => { const p = getPathById(pid); return p ? p.name : pid; }).join('/');
-        const modDesc = isDefaultMod ? '' : `<br><small style="color:${mod.tone};opacity:0.85;">${mod.icon} ${mod.desc}${prefPaths ? `（宜：${prefPaths}）` : ''}</small>`;
+        // 词缀说明：复用 getMapModifierBrief（内部即 resolveMapEnv + getMapRewardMods 派生），展示 风险/奖励/应对。
+        const brief = isDefaultMod ? null : getMapModifierBrief(i, player);
+        const modDesc = brief
+            ? `<br><small style="color:${mod.tone};opacity:0.9;">${mod.icon} ${mod.desc}</small>`
+            + `<br><small style="color:#d9a06b;">⚠️ 风险：${brief.risk.join('、')}</small>`
+            + `<br><small style="color:var(--color-success);opacity:0.9;">🎁 奖励：${brief.reward.join('、')}</small>`
+            + `<br><small style="color:#8fb8e0;">💡 应对：${brief.advice.join('；')}</small>`
+            : '';
         card.innerHTML = `<div><strong>关卡 ${i}：${MAP_NAMES[i - 1] || `神秘禁区`}</strong> ${!isUnlocked ? '🔒' : ''}<br><small style="color:var(--text-muted)">准入: ${getRealmName(reqLevel)} · 推荐 <span style="color:var(--color-blue)">${recTier.name}套</span> · 掉 ${recTier.name}矿${modLabel}</small>${modDesc}</div><button class="btn" ${isUnlocked ? '' : 'disabled'} data-act="hangup" data-map="${i}">${player.currentMapId === i ? '历练中' : '挑战'}</button>`;
         box.appendChild(card);
     }
@@ -563,7 +595,13 @@ export function renderProduction() {
             const spd = Math.round((1 - idleSpeedFactor(lv)) * 100);
             const yld = Math.round(bonusYieldChance(lv) * 100);
             const base = lv >= maxLv ? '已臻化境（满级）' : `修为 ${formatNumber(exp - cur)} / ${formatNumber(next - cur)}`;
-            expTxt.innerText = `${base} · 提速 ${spd}% · 双倍产出 ${yld}%`;
+            // 下一解锁 + 当前活动产出（复用 getNextUnlock 纯函数）——让玩家清楚「再练多少能解锁啥、现在在产啥」。
+            const nu = getNextUnlock(player, prof);
+            const unlockLine = nu.atMax ? '已满级，动作全解锁'
+                : (nu.nextUnlock ? `下一解锁：Lv.${nu.nextUnlock.levelReq}「${nu.nextUnlock.name}」(产 ${nu.nextUnlock.output})，还差修为 ${formatNumber(nu.toNext)}`
+                    : '本技能动作已全部解锁');
+            const curLine = nu.current ? `　·　▶ 当前：${nu.current.name} → 每次产 ${nu.current.output}` : '';
+            expTxt.innerHTML = `${base} · 提速 ${spd}% · 双倍产出 ${yld}%<br><span style="color:var(--color-blue);">🔓 ${unlockLine}${curLine}</span>`;
         }
         const list = document.getElementById(`${prof}-list`);
         if (list) list.innerHTML = ACTIVITIES.filter(a => a.prof === prof).map(a => activityCardHtml(a, player)).join('');
@@ -654,6 +692,7 @@ export function renderEnhance() {
                 const matCol = okMat ? 'var(--color-success)' : 'var(--color-accent)';
                 const coinCol = okCoin ? 'var(--color-gold)' : 'var(--color-accent)';
                 costLine = `升 +${cost.targetLevel} 需 <span style="color:${matCol}">${matName}×${cost.ingotQty}(有${formatNumber(have)})</span> · <span style="color:${coinCol}">碎银 ${formatNumber(cost.coin)}</span>`;
+                if (!okMat) costLine += `<br><span style="color:var(--color-accent);">缺口：还差 ${matName}×${formatNumber(cost.ingotQty - have)} → ${materialSourceHint(cost.ingotKey)}</span>`;
                 btn = `<button class="btn btn-success" data-act="enhance-equip" data-slot="${slot}" ${okMat && okCoin ? '' : 'disabled'}>⚒ 强化 +${cost.targetLevel}</button>`;
             }
             return `<div class="act-card ${lv > 0 ? 'running' : ''}">
@@ -717,7 +756,8 @@ export function renderCraft() {
     }).join('');
     const affixLine = `<div style="margin-bottom:6px;"><span style="font-size:12px;color:var(--text-muted);">副词条：</span><span class="craft-tabs">${affixBtns}</span></div>` +
         `<div class="prof-exp-text" style="margin-bottom:10px;">${curAffix.desc}${curAffix.extraIngot ? ` <span style="color:var(--color-accent)">（额外耗 ${matName}×${curAffix.extraIngot}）</span>` : ''}</div>`;
-    const setLine = `<div class="prof-exp-text" style="margin-bottom:10px;">完整 ${T.name} 套装(${slots.length} 件)：每件耗 ${matName}×${needIngot} + 碎银 ${formatNumber(cost.coin)}（副词条与强化另计）</div>`;
+    const gapLine = have < needIngot ? `<br><span style="color:var(--color-accent);">材料缺口：每件还差 ${matName}×${needIngot - have}（现有 ${formatNumber(have)}）→ ${materialSourceHint(cost.ingotKey)}</span>` : '';
+    const setLine = `<div class="prof-exp-text" style="margin-bottom:10px;">完整 ${T.name} 套装(${slots.length} 件)：每件耗 ${matName}×${needIngot} + 碎银 ${formatNumber(cost.coin)}（副词条与强化另计）${gapLine}</div>`;
 
     box.innerHTML = adviceLine + affixLine + setLine + slots.map(({ key: slot }) => {
         const pv = makeGearPiece(selectedCraftTier, slot, 0); // 预览(凡品成色)属性
@@ -741,12 +781,23 @@ export function renderDungeon() {
     // Boss 列表
     const bossBox = document.getElementById('boss-list');
     if (bossBox) {
+        const DANGER = {
+            safe: ['🟢 胜算高', 'var(--color-success)'], risky: ['🟡 有风险', 'var(--color-gold)'],
+            deadly: ['🔴 凶险', 'var(--color-accent)'], locked: ['🔒 未解锁', 'var(--text-muted)'], unknown: ['⚪ 未知', 'var(--text-muted)']
+        };
         bossBox.innerHTML = BOSSES.map(b => {
-            const locked = player.realmLevel < b.realmReq;
+            const plan = getBossPlan(player, b);          // 复用：解锁/掉落用途/胜算/对症准备/推荐关卡
+            const locked = !plan.unlocked;
+            const [dLabel, dCol] = DANGER[plan.danger] || DANGER.unknown;
+            const wrTxt = (plan.winRate != null) ? `（试算胜率约 ${Math.round(plan.winRate * 100)}%）` : '';
             return `<div class="act-card ${locked ? 'locked' : ''}">
                 <div class="act-head"><span class="act-title">👹 ${b.name}</span>
                     <button class="btn btn-danger" data-act="challenge-boss" data-boss="${b.id}" ${locked ? 'disabled' : ''}>${locked ? '🔒 ' + getRealmName(b.realmReq) : '挑战'}</button></div>
-                <div class="act-meta">掉落 💎神魂结晶×${b.crystalMin}~${b.crystalMax} · 碎银 ${formatNumber(b.coin)}${locked ? ` · 需 ${getRealmName(b.realmReq)}` : ''}</div>
+                <div class="act-meta">🔑 解锁：${plan.unlockText}</div>
+                <div class="act-meta" style="color:#bbb;">🎁 掉落用途：${plan.dropUse}</div>
+                <div class="act-meta">📊 胜算：<b style="color:${dCol}">${dLabel}</b>${wrTxt}</div>
+                <div class="act-meta" style="color:#8fb8e0;">📍 ${plan.stageHint}</div>
+                <div class="act-meta" style="color:#caa;">🛠 准备：${plan.prep.join('　')}</div>
             </div>`;
         }).join('');
     }
@@ -860,8 +911,22 @@ export function renderQuestPanel() {
         `<div class="achievement-summary-text">已达成 ${doneCount}/${total} · 已领取 ${claimedCount}/${total}（${pct}%）` +
         `${current ? ` · 当前指引：<b style="color:var(--color-gold)">${current.title}</b>` : ' · 🎉 新手指引全部完成！'}</div>`;
 
+    // —— 顶部「下一步建议」（卡关反馈）：纯函数 getGameplayAdvice 据当前状态派生，最多 4 条 ——
+    const advice = getGameplayAdvice(player);
+    let html =
+        `<div class="sub-panel" style="margin-bottom:14px;border:1px solid var(--color-gold);background:rgba(194,169,95,0.06);">
+            <div style="font-weight:bold;color:var(--color-gold);margin-bottom:6px;">🧭 下一步建议</div>` +
+        (advice.length
+            ? advice.map(a =>
+                `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-top:1px solid rgba(255,255,255,0.06);">
+                    <span style="font-size:16px;">${a.icon}</span>
+                    <span style="flex:1;font-size:13px;color:#ddd;line-height:1.5;">${a.text}</span>
+                    ${a.page ? `<button class="btn" style="padding:3px 12px;flex:none;" data-act="switch-page" data-page="${a.page}">前往</button>` : ''}
+                </div>`).join('')
+            : `<div style="font-size:13px;color:var(--text-muted);padding:4px 2px;">✅ 当前没有紧要待办，放心挂机历练吧。</div>`) +
+        `</div>`;
+
     // 当前推荐任务（醒目大卡）
-    let html = '';
     if (current) {
         const p = getQuestProgress(player, current);
         const claimable = p.done; // current 恒为「第一条未领取」，故 done 即可领取
@@ -934,6 +999,10 @@ export function renderPathPage() {
            </div>`
         : `<div class="list-card" style="justify-content:center;color:var(--text-muted);">尚未择道——选择一门流派，确立你的成长方向（<b style="color:var(--color-gold)">首次免费</b>）。</div>`;
 
+    // 适配评价（复用纯函数 getPathRecommendations；据当前装备/属性/卡点给建议，不替玩家选择）。
+    const recById = Object.fromEntries(getPathRecommendations(player).map(r => [r.pathId, r]));
+    const FIT = { high: ['强烈推荐', 'var(--color-success)'], medium: ['可以考虑', 'var(--color-gold)'], low: ['暂不急', 'var(--text-muted)'] };
+
     const cards = CULTIVATION_PATHS.map(p => {
         const isCurrent = player.cultivationPath === p.id;
         const unlocked = isPathUnlocked(player, p);
@@ -950,18 +1019,26 @@ export function renderPathPage() {
             btn = `<button class="btn ${afford ? 'btn-success' : ''}" data-act="select-path" data-path="${p.id}"${afford ? '' : ' disabled'}>改修 (${formatNumber(switchInfo.coin)}文)</button>`;
         }
 
+        // 适配建议块
+        const rec = recById[p.id];
+        const [fitLabel, fitCol] = rec ? (FIT[rec.fit] || FIT.medium) : FIT.medium;
+        const recBlock = rec ? `
+            <div class="act-meta" style="margin-top:6px;border-top:1px dashed rgba(255,255,255,0.08);padding-top:6px;">💡 适配你的现状：<b style="color:${fitCol};">${fitLabel}</b> · ${rec.reason}</div>
+            <div class="act-meta" style="color:#d9a06b;">🔧 需补短板：${rec.shortfall}</div>
+            <div class="act-meta" style="color:#8fb8e0;">🧭 适配方向：${rec.direction}</div>` : '';
+
         return `<div class="act-card ${isCurrent ? 'running' : ''} ${unlocked ? '' : 'locked'}" style="margin-bottom:10px;">
             <div class="act-head"><span class="act-title">${isCurrent ? '✦ ' : ''}${p.name}</span>${btn}</div>
             <div style="margin:4px 0 6px;">${tags}</div>
             <div class="act-meta" style="font-size:12px;color:#bbb;">${p.desc}</div>
             <ul style="margin:8px 0 4px;padding-left:18px;line-height:1.8;font-size:12px;">${bonusHtml}${penaltyHtml}</ul>
-            <div class="act-meta">📌 推荐养成：${p.recommendedStats}　·　解锁：${p.unlockRealmLevel <= 1 ? '开局即可' : getRealmName(p.unlockRealmLevel)}</div>
+            <div class="act-meta">📌 推荐养成：${p.recommendedStats}　·　解锁：${p.unlockRealmLevel <= 1 ? '开局即可' : getRealmName(p.unlockRealmLevel)}</div>${recBlock}
             <div class="act-meta" style="color:#777;font-style:italic;">「${p.flavorText}」</div>
         </div>`;
     }).join('');
 
     box.innerHTML = head +
-        `<div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin:12px 0 8px;">首次择道免费；之后改换门庭按已切换次数递增碎银（确认后扣费，属性即时更替）。流派加成与代价已计入面板战力。</div>` +
+        `<div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin:12px 0 8px;">首次择道免费；之后改换门庭按已切换次数递增碎银（确认后扣费，属性即时更替）。流派加成与代价已计入面板战力。<br>下方「💡 适配你的现状」依据你当前的装备 / 属性 / 卡点给出参考，<b>仅供建议，不会替你选择</b>。</div>` +
         cards;
 }
 
