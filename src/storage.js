@@ -4,12 +4,12 @@
 // 另含「加密导入导出」（文件末尾）：AES-GCM(固定密钥) 把存档导出为离线备份，
 // 仅作防篡改/防随手改档的混淆 —— 密钥就在前端源码里，非机密级保护。
 // ============================================================
-import { state, makeDefaultPlayer, makeDefaultRun, makeDefaultRecords } from './state.js';
+import { state, makeDefaultPlayer, makeDefaultRun, makeDefaultRecords, makeDefaultLoadout, makeDefaultOrders, makeDefaultReputation } from './state.js';
 import { SKILL_SUFFIXES, GEAR_SLOTS, PROFESSIONS } from './config.js';
-import { syncQuestProgress } from './domain.js';
+import { syncQuestProgress, ensureLoadout } from './domain.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
-const SAVE_VERSION = 7;                 // v7: records历世记录（v6 地图词缀/黑市刷新 / v5 cultivationPath / v4 quests）；补全在 normalizePlayer，旧档不炸
+const SAVE_VERSION = 8;                 // v8: 第四阶段 loadout(秘籍装配)/orders(江湖委托)/reputation(派系声望)（v7 records / v6 词缀·黑市 / v5 流派 / v4 指引）；补全在 normalizePlayer，旧档不炸
 
 export function saveGame() {
     if (!state.player.name) return;
@@ -118,6 +118,14 @@ export function normalizePlayer(parsed) {
     if (!Number.isFinite(rec.bossKills) || rec.bossKills < 0) rec.bossKills = 0;
     if (!Number.isFinite(rec.ascensions) || rec.ascensions < 0) rec.ascensions = 0;
     if (!Array.isArray(rec.talentsSeen)) rec.talentsSeen = [];
+    // —— 第四阶段·秘籍装配 / 江湖委托 / 派系声望 字段补全（v8 新增）——
+    if (!p.loadout || typeof p.loadout !== 'object') p.loadout = makeDefaultLoadout();
+    if (!p.orders || typeof p.orders !== 'object') p.orders = makeDefaultOrders();
+    const od = p.orders;
+    if (!Array.isArray(od.active)) od.active = [];
+    ['completedCount', 'refreshCount', 'lastRefreshAt'].forEach(k => { if (!Number.isFinite(od[k]) || od[k] < 0) od[k] = 0; });
+    if (!p.reputation || typeof p.reputation !== 'object') p.reputation = makeDefaultReputation();
+    Object.keys(makeDefaultReputation()).forEach(k => { if (!Number.isFinite(p.reputation[k]) || p.reputation[k] < 0) p.reputation[k] = 0; });
     // 静默基线同步：填好 completed[] 与 activeId（不弹提示），避免旧档首个动作触发「一次性补发」的提示风暴。
     syncQuestProgress(player);
     // —— 修行流派字段补全（v5 新增）：旧档无 path 字段 → 默认未择道(null)，保持原始数值、不强制选择 ——
@@ -127,6 +135,8 @@ export function normalizePlayer(parsed) {
     // —— 地图词缀成就计数补全（v6 新增）——
     if (!Number.isFinite(p.thunderWins) || p.thunderWins < 0) p.thunderWins = 0;
     if (!Number.isFinite(p.swordTombWeapons) || p.swordTombWeapons < 0) p.swordTombWeapons = 0;
+    // 秘籍装配兜底 + 旧档自动配招（清悬空 id / active 与 passives 全空且有可装秘籍则自动配「最强主动 1 + 被动 3」）。
+    ensureLoadout(player);
     return player;
 }
 

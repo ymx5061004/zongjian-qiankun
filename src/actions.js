@@ -4,13 +4,15 @@
 // ============================================================
 import { state } from './state.js';
 import { BALANCE, MATERIALS, GEAR_TIERS, QUALITY_NAMES, BOSSES, GEAR_SLOTS } from './config.js';
-import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost, getCraftAffixById, applyCraftAffix, getBossPlan, materialSourceHint, shopRefreshCost, decayedRefreshSteps } from './domain.js';
+import { computeForgeCost, computeForgeResult, partitionByQuality, partitionAllGear, enhanceCost, levelFromExp, makeGearPiece, gearCraftCost, rollQuality, computeStats, getRealmName, finalizeBossStats, simulateBattle, getCombatSkills, gearUpgradeCost, bagExpandCost, getGuideQuestById, syncQuestProgress, claimGuideQuestReward as claimGuideQuestRewardDomain, unlockedGearSlots, generateSkillByMatrix, getPathById, getActivePath, pathSwitchCost, getCraftAffixById, applyCraftAffix, getBossPlan, materialSourceHint, shopRefreshCost, decayedRefreshSteps, ensureLoadout, skillSlotKind } from './domain.js';
 import { getModifiers } from './run.js';
+import { getHeartArt, getForbiddenArt } from './config/manuals.js';
+import { ensureOrders, canSubmitOrder, resolveOrderRewards, refillOrder, orderRefreshSteps, orderRefreshCost, generateOrders, missingText } from './orders.js';
 import {
     updatePlayerAttributes, renderMapList, renderBag, renderForge,
     renderShopGoods, renderPlayerSkills, hideTooltip, getShopGood,
     rollShopGoods, removeShopGood, skillBrief, skillDescText, renderEnhance, renderCraft, renderDungeon, renderWarehouse, renderBagExpand, renderPills,
-    renderQuestPanel, fmtQuestReward, renderPathPage
+    renderQuestPanel, fmtQuestReward, renderPathPage, renderLoadout, renderOrdersPage
 } from './ui/render.js';
 import { saveGame, exportSaveString, importSaveString } from './storage.js';
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
@@ -440,6 +442,7 @@ export async function useBagItem(idx) {
         } else {
             if (player.skills.find(s => s.name === item.payload.name)) { toast("你早已对此门武学烂熟于心。", 'error'); return; }
             player.skills.push(item.payload);
+            autoEquipLearned(player, item.payload);   // 有空槽则自动携带，满则需手动取舍
             player.bag.splice(curIdx, 1);
             toast(`✨ 成功参悟绝学：《${item.payload.name}》！`, 'success');
             checkAchievementsAndNotify('skill');
@@ -480,7 +483,7 @@ export function challengeBoss(bossId) {
     if (!boss) return;
     if (player.realmLevel < boss.realmReq) { toast(`境界不足，挑战【${boss.name}】需 ${getRealmName(boss.realmReq)}。`, 'error'); return; }
     const stats = computeStats(player).stats;
-    const { enemyDead } = simulateBattle(stats, finalizeBossStats(boss), player.skills);
+    const { enemyDead } = simulateBattle(stats, finalizeBossStats(boss), getCombatSkills(player));
     if (!enemyDead) {
         // 有指导性的失败提示：复用 getBossPlan 给「推荐先通关卡 + 对症准备(强化/炼丹/流派)」，而非只说不敌。
         const plan = getBossPlan(player, boss);
@@ -620,6 +623,63 @@ export function unequip(slot) {
     updatePlayerAttributes();
 }
 
+// ============================================================
+// 第四阶段·秘籍装配：装配 / 卸下（轻量，不消耗资源）。即时重算属性面板，与战斗同源。
+// ============================================================
+// 新学秘籍：若对应槽位尚有空位则自动携带（满则需玩家手动取舍）。
+function autoEquipLearned(player, sk) {
+    if (!sk || !sk.id) return;
+    ensureLoadout(player);
+    const lo = player.loadout, kind = skillSlotKind(sk);
+    if (kind === 'active' && !lo.active) lo.active = sk.id;
+    else if (kind === 'passive' && !lo.passives.includes(sk.id) && lo.passives.length < BALANCE.loadout.passiveSlots) lo.passives.push(sk.id);
+}
+
+// 装配变更后：重渲装配区 + 秘籍列表（装配标记）+ 属性面板（战力即时反映）+ 存档。
+function afterLoadoutChange() {
+    renderLoadout();
+    renderPlayerSkills();
+    updatePlayerAttributes();
+    saveGame();
+}
+
+export function equipLoadout(kind, id) {
+    const player = state.player;
+    ensureLoadout(player);
+    const lo = player.loadout, L = BALANCE.loadout;
+    if (kind === 'active') {
+        const sk = player.skills.find(s => s.id === id);
+        if (!sk || skillSlotKind(sk) !== 'active') { toast('该秘籍不可装入【主动】槽。', 'error'); return; }
+        lo.active = id;
+    } else if (kind === 'passive') {
+        const sk = player.skills.find(s => s.id === id);
+        if (!sk || skillSlotKind(sk) !== 'passive') { toast('该秘籍不可装入【被动】槽。', 'error'); return; }
+        if (lo.passives.includes(id)) { toast('此秘籍已在装配中，不能重复装配。', 'error'); return; }
+        if (lo.passives.length >= L.passiveSlots) { toast(`被动槽已满（最多 ${L.passiveSlots} 门），请先卸下一门。`, 'error'); return; }
+        lo.passives.push(id);
+    } else if (kind === 'heart' || kind === 'forbidden') {
+        const art = kind === 'heart' ? getHeartArt(id) : getForbiddenArt(id);
+        if (!art) { toast('该秘籍不存在。', 'error'); return; }
+        if (player.realmLevel < (art.unlockRealmLevel || 1)) { toast(`境界未至，「${art.name}」需 ${getRealmName(art.unlockRealmLevel)} 方可参修。`, 'error'); return; }
+        lo[kind] = id;
+    } else return;
+    afterLoadoutChange();
+    const nm = kind === 'heart' ? getHeartArt(id).name : (kind === 'forbidden' ? getForbiddenArt(id).name : ((player.skills.find(s => s.id === id) || {}).name || ''));
+    toast(`已装配【${nm}】。`, 'success');
+}
+
+export function unequipLoadout(kind, id) {
+    const player = state.player;
+    ensureLoadout(player);
+    const lo = player.loadout;
+    if (kind === 'active') lo.active = null;
+    else if (kind === 'passive') lo.passives = lo.passives.filter(x => x !== id);
+    else if (kind === 'heart') lo.heart = null;
+    else if (kind === 'forbidden') lo.forbidden = null;
+    else return;
+    afterLoadoutChange();
+}
+
 // —— 升级秘籍 ——
 export function upgradePlayerSkill(idx) {
     const player = state.player;
@@ -653,8 +713,10 @@ export async function forgetSkill(idx) {
     const curIdx = player.skills.indexOf(sk); // 异步确认期间数组可能变动，按引用重新定位
     if (curIdx === -1) { toast("该功法已不在身上。", 'error'); return; }
     player.skills.splice(curIdx, 1);
+    ensureLoadout(player);   // 清理装配中残留的该技能 id（若卸空主动槽会自动补下一门）
     toast(`已遗忘《${sk.name}》，神识清明。`, 'success');
     renderPlayerSkills();
+    renderLoadout();
     updatePlayerAttributes();
     saveGame();
 }
@@ -671,6 +733,7 @@ export function learnAllSkills() {
         if (!name) { remain.push(it); return; }                                  // 异常书，原样保留
         if (player.skills.find(s => s.name === name)) { dup++; remain.push(it); return; } // 已会：保留书
         player.skills.push(it.payload);
+        autoEquipLearned(player, it.payload);   // 有空槽则自动携带
         learned++;
     });
     player.bag = remain;
@@ -761,4 +824,42 @@ export function takePill(key) {
     saveGame();
     const eff = Object.entries(applied).map(([k, v]) => `${PILL_LABEL[k]}+${v}${(k === 'crit' || k === 'dodge') ? '%' : ''}`).join('、');
     toast(`服下【${m.name}】，永久 ${eff}！`, 'success');
+}
+
+// ============================================================
+// 第四阶段·江湖委托：交付 / 刷新（真实扣材料、发奖励、变声望/因果、存档）。
+// ============================================================
+export function submitOrder(uid) {
+    const player = state.player;
+    ensureOrders(player);
+    const order = player.orders.active.find(o => o.uid === uid);
+    if (!order) { toast('该委托已不存在，请刷新。', 'error'); return; }
+    const chk = canSubmitOrder(player, order);
+    if (!chk.ok) { toast(`无法交付：尚缺 ${missingText(chk.missing)}。`, 'error'); return; }
+    const logs = resolveOrderRewards(player, order);         // 扣料 + 发奖 + 变声望/因果
+    player.orders.completedCount = (player.orders.completedCount || 0) + 1;
+    refillOrder(player, uid);                                // 移除已交 + 补一个新委托
+    renderOrdersPage();
+    renderWarehouse();          // 物料仓库随扣料/奖励刷新（若可见）
+    updatePlayerAttributes();   // 碎银/修为/洪荒/战力反映顶栏与面板
+    checkAchievementsAndNotify('coin');
+    saveGame();
+    toast(`📜 委托达成：${logs.join('　')}`, 'success');
+}
+
+export function refreshOrders() {
+    const player = state.player;
+    ensureOrders(player);
+    const now = Date.now();
+    const steps = orderRefreshSteps(player.orders, now);
+    const cost = orderRefreshCost(steps);
+    if ((player.coin || 0) < cost) { toast(`刷新委托需 ${formatNumber(cost)} 文碎银，碎银不足（连刷涨价，稍候会回落）。`, 'error'); return; }
+    player.coin -= cost;
+    player.orders.refreshCount = Math.min(BALANCE.orders.refreshMaxStep, steps + 1);
+    player.orders.lastRefreshAt = now;
+    player.orders.active = generateOrders(player);
+    renderOrdersPage();
+    updatePlayerAttributes();
+    saveGame();
+    toast(`已消耗 ${formatNumber(cost)} 文，江湖委托焕新（连刷涨价，空闲回落）。`, 'success');
 }

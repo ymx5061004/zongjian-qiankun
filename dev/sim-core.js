@@ -14,7 +14,7 @@ import {
 } from '../src/config.js';
 import {
     finalizeEnemyStats, computeStats, simulateBattle, resolveMapEnv, getMapModifier,
-    getMapRewardMods, makeGearPiece, unlockedGearSlots, mapTier, effDurationMs, getRealmName
+    getMapRewardMods, makeGearPiece, unlockedGearSlots, mapTier, effDurationMs, getRealmName, ensureLoadout
 } from '../src/domain.js';
 
 // 关卡解锁所需境界（与 render.renderMapList 同式）：floor((stage-1)*1.1)+1。
@@ -44,6 +44,7 @@ export function buildPlayer({ stage = 1, gearTier = null, quality = 0, enhance =
     p.skills = [{ id: 's_init', name: '太祖长拳', type: 'active', level: 1, baseRate: 0.35, power: 1.3 }];
     if (honghuangLevel > 0) p.skills.push({ id: 'sk_hh', name: '混沌诀', type: 'passive', level: honghuangLevel, isHongHuang: true });
     p.cultivationPath = path;
+    ensureLoadout(p);   // 第四阶段：sim 也走真实装配（初始拳法入主动槽 + 洪荒恒生效），与实战同源、基线不漂移
     return p;
 }
 

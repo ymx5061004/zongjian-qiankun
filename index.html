@@ -71,6 +71,7 @@
                 <div class="menu-group-title" data-act="toggle-group">江湖商市</div>
                 <div class="menu-items">
                     <button class="menu-item" data-act="switch-page" data-page="shop"><span class="menu-icon">💰</span>珍宝黑市</button>
+                    <button class="menu-item" data-act="switch-page" data-page="orders"><span class="menu-icon">🤝</span>江湖委托</button>
                     <button class="menu-item" data-act="switch-page" data-page="guide"><span class="menu-icon">📜</span>江湖秘典</button>
                 </div>
             </div>
@@ -137,6 +138,7 @@
             <div class="sub-panel">
                 <div class="panel-title">死亡禁区 (共100关，每关难度翻倍)</div>
                 <div id="combat-assessment" style="margin-bottom:8px;"></div>
+                <div id="tianji-panel" style="margin-bottom:8px;"></div>
                 <div class="scroll-box" id="map-list-box"></div>
                 <button class="btn btn-danger" style="width:100%; margin-top:8px;" data-act="stop-hangup">打坐收招，运功调息</button>
             </div>
@@ -227,6 +229,10 @@
         </div>
 
         <div id="page-kungfu" class="page">
+            <div class="sub-panel" style="grid-column: span 2;">
+                <div class="panel-title">⚙️ 秘籍装配 <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">（拥有≠携带：择优配招，主动1·被动3·心法1·禁忌1；洪荒恒生效不占槽）</span></div>
+                <div class="scroll-box" id="loadout-box" style="max-height:46vh;"></div>
+            </div>
             <div class="sub-panel" style="grid-column: span 2;">
                 <div class="panel-title">
                     百门绝学宝库
@@ -363,6 +369,13 @@
             <div class="sub-panel" style="grid-column: span 2;">
                 <div class="panel-title">📖 江湖秘典 · 全机制图解</div>
                 <div class="scroll-box guide-content" id="guide-content" style="max-height: 72vh;"></div>
+            </div>
+        </div>
+
+        <div id="page-orders" class="page">
+            <div class="sub-panel" style="grid-column: span 2;">
+                <div class="panel-title">🤝 江湖委托 / 宗门订单 <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">（交付材料/丹药换碎银·修为·声望；声望解锁稀有委托，黑市招因果）</span></div>
+                <div class="scroll-box" id="orders-content" style="max-height: 74vh;"></div>
             </div>
         </div>
 

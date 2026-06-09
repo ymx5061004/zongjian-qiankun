@@ -29,6 +29,7 @@ export function makeDefaultPlayer() {
         equips: { weapon: null, subweapon: null, armor: null, helm: null, ring: null, artifact: null, amulet: null, gloves: null, boots: null },
         bag: [], bagMax: 16,           // 默认16格；扩容靠黑市常驻购买（见 BALANCE.bag / domain.bagExpandCost）
         skills: [],
+        loadout: makeDefaultLoadout(),   // 第四阶段·秘籍装配：携带哪些秘籍进战斗（拥有≠携带；洪荒恒生效不占槽）
         currentMapId: null,
         // —— 生产/挂机 ——
         professions: { mining: { exp: 0 }, smithing: { exp: 0 }, herb: { exp: 0 }, alchemy: { exp: 0 } }, // 各生产技能累计经验
@@ -58,8 +59,27 @@ export function makeDefaultPlayer() {
         // —— 黑市货架 + 刷新状态（goods 存档，页面刷新不重摇；per-life 计数随 startLife 清空）——
         shop: { goods: [], refreshCount: 0, lastRefreshAt: 0, lifeRefreshCount: 0, booksBoughtThisLife: 0, gearBoughtThisLife: 0 },
         // —— 历世记录（江湖录·元进度；跨世永久累积）——
-        records: makeDefaultRecords()
+        records: makeDefaultRecords(),
+        // —— 第四阶段·江湖委托/宗门订单 + 派系声望（跨世永久累积）——
+        orders: makeDefaultOrders(),
+        reputation: makeDefaultReputation()
     };
+}
+
+// 秘籍装配（第四阶段）：携带进战斗的秘籍。active/passives 存「已拥有 skills 的 id」（active≤1、passives≤3）；
+// heart/forbidden 存「内置心法/禁忌图鉴 id」（见 config/manuals.js）。洪荒功法恒生效、不占槽。
+export function makeDefaultLoadout() {
+    return { active: null, passives: [], heart: null, forbidden: null };
+}
+
+// 江湖委托（第四阶段）：active=当前展示的委托实例数组；其余为完成/刷新计数（反无限刷新，刷新费用几何递增）。
+export function makeDefaultOrders() {
+    return { active: [], completedCount: 0, refreshCount: 0, lastRefreshAt: 0 };
+}
+
+// 派系声望（第四阶段）：0~repMax 的整数，跨世永久累积；影响委托奖励倍率 / 稀有委托出现 / 黑市因果风险。
+export function makeDefaultReputation() {
+    return { qingcheng: 0, yaowang: 0, zhujian: 0, blackmarket: 0, commoners: 0 };
 }
 
 // 历世记录：最高世数 / 最深区域 / 最佳本世评分与评价 / 累计斩 Boss / 飞升次数 / 见过的本世感悟。

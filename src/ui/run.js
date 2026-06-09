@@ -18,7 +18,7 @@ import {
     finalizeNodeEnemy, vsBonusPctFor, nodeAgeCost, pickEventForNode, markEventSeen, choiceAvailable,
     applyEventChoice, planNodeReward, settleLife, applyDeathPenalty, clampHp, isLifeActive, NODE_TYPE_INFO
 } from '../run.js';
-import { computeStats, simulateBattle, makeGearPiece, generateSkillByMatrix, unlockedGearSlots, rollQuality } from '../domain.js';
+import { computeStats, simulateBattle, getCombatSkills, makeGearPiece, generateSkillByMatrix, unlockedGearSlots, rollQuality } from '../domain.js';
 import { updatePlayerAttributes, renderBag, hideTooltip } from './render.js';
 import { toast, chooseCard, infoDialog, confirmDialog } from './dialog.js';
 import { saveGame } from '../storage.js';
@@ -469,7 +469,7 @@ async function resolveBattleNode(player, node, maxHp) {
     const enemy = finalizeNodeEnemy(player, node);
     const mods = getModifiers(player);
     const tactic = getTactic(player.run.selectedTactic);
-    const result = simulateBattle(stats, enemy, player.skills, {
+    const result = simulateBattle(stats, enemy, getCombatSkills(player), {
         tactic, startHp: player.run.hp, vsBonusPct: vsBonusPctFor(player, node), poisonMult: 1 + mods.poisonMult
     });
     player.run.hp = clampHp(result.remainingHp, maxHp);

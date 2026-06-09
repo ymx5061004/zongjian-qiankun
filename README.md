@@ -18,7 +18,9 @@ zongjian-qiankun/
 │   │   ├── regions.js    5 个江湖区域 + 节点构成模板 + 战场修饰
 │   │   ├── events.js     25 个奇遇事件(数据驱动的选择/效果/条件，含事件链)
 │   │   ├── runtalents.js 12 个本世奇珍/感悟(剑/毒/守/通用 三系，仅当世) ★二期
-│   │   └── enemyaffixes.js 敌人词条(狂暴/再生/荆棘/护体/嗜血/天罚) ★二期
+│   │   ├── enemyaffixes.js 敌人词条(狂暴/再生/荆棘/护体/嗜血/天罚) ★二期
+│   │   ├── manuals.js   心法/禁忌 图鉴(秘籍装配) ★四期
+│   │   └── orders.js    江湖委托模板 + 5 派系 ★四期
 │   ├── util.js         通用纯工具(formatNumber 等)
 │   ├── state.js        【状态层】唯一数据源 state(player/finalStats/...)；player.run/legacies 为轮回态
 │   ├── storage.js      存档：localStorage 读写 + 版本号 + 迁移 + 容错（v5：补全 run/legacies）
@@ -26,6 +28,7 @@ zongjian-qiankun/
 │   │                     computeStats(含命格/遗产修正) / simulateBattle(含策略/持久血量) / 生成器 / ...
 │   ├── run.js          【逻辑层·百世轮回】纯引擎：命格遗产修正聚合 / 节点图生成 / 敌人 /
 │   │                     奇遇结算 / 节点奖励计划 / 生死结算。仅依赖 config，被 domain 反向依赖(无循环)
+│   ├── orders.js        【逻辑层·四期】江湖委托纯逻辑：生成/校验/结算/刷新/声望(依赖 config + domain 工具，无环)
 │   ├── ui/
 │   │   ├── dialog.js    toast / 异步 confirm / 多选 choose / chooseCard(卡片三选一)
 │   │   ├── render.js    【视图层】面板渲染 + tooltip + 切页
@@ -40,6 +43,7 @@ zongjian-qiankun/
 分层依赖方向（单向，无循环）：
 `config / config/* / util` ← `run` ← `domain` ← `render` ← `battle` ← `actions` ← `ui/run` ← `main`
 （`run.js` 只依赖数据层，故 `domain.computeStats` 可反向取其修正而不成环。）
+（四期新增 `orders.js` 居 `domain` 之后：仅依赖 `config` 与 `domain` 的纯工具，被 `actions`/`render` 取用，无环。）
 
 ## 🆕 百世轮回 Roguelite（第一阶段）
 
@@ -71,6 +75,16 @@ zongjian-qiankun/
 - **区域剧情 + 多结局飞升**：每区域开场叙事（首世入场 / 深入新区域时）；踏破最后区域之主可<b>「⭐ 飞升·通天」</b>——按<b>因果/主修流派</b>给不同结局（煞神/仙道/剑仙/毒尊/不灭金身/通天）+ 终局厚赏 + 记录飞升，随后开启新一世。
 - **江湖录·图鉴 + 历世记录**：新页「📓 江湖录」——策略/命格/遗产/感悟/敌词条 全图鉴（已拥有/已识高亮）+ 历世记录（最高世/最深区/最佳评价/累计斩 Boss/飞升次数/收集度）+ 三系构筑建议。记录存 `player.records`（v7）。
 - **Boss 机制化**：区域之主超出词条——<b>残血狂暴</b>（一次性提攻）+ <b>周期蓄力大招</b>（逢 N 回合一击 ×倍率），战斗日志标注；仅 Boss 生效，百关/秘境零影响。
+
+### 第四阶段（已实现）
+
+把「数值堆叠」改造为「带取舍的构筑」。三大系统全部**数据驱动**、与战斗**同源**（统一走 `computeStats`）、旧档**自动迁移**（`SAVE_VERSION` 升至 **8**，缺字段补默认、不白屏）：
+
+- **秘籍装配（拥有 ≠ 携带）**：新增 `player.loadout`（主动 1 / 被动 3 / 心法 1 / 禁忌 1）。**仅「携带」的秘籍计入战斗**，已学但未装配的不再全部叠入战力——每世/卡关前都要配招。新增**心法**（改变成长方向：气血流 / 剑爆 / 守御 / 持续）与**禁忌**（强收益 + 硬代价：血河禁卷暴伤↑气血↓、蚀骨毒经流血↑攻↓、燃寿剑章先发爆发↑气血↓、无相残篇闪避↑防御↓）两类内置图鉴；**洪荒功法恒生效、不占槽**。数据在 `config/manuals.js`，叠加层逻辑 `domain.loadoutArtModifiers / getCombatSkills / ensureLoadout`，UI 在「百修秘籍」页。旧档自动配「最强主动 1 + 被动 3」，老玩家不骤弱。
+- **江湖委托 / 宗门订单 + 声望**：5 大派系（铸剑山庄 / 药王谷 / 青城派 / 黑市牙行 / 无名散修），每批 3 张委托，交付**真实材料 / 丹药 / 碎银**换碎银·修为·**派系声望**·因果。声望放大该派奖励、解锁稀有 / 史诗委托；黑市委托招因果（轮回风险）。刷新费用几何递增 + 随时间衰减（反无限刷新），每世重置。数据 `config/orders.js`、逻辑 `src/orders.js`、UI 新页「江湖委托」。新增 `player.orders` / `player.reputation`。
+- **天机推演（卡关诊断增强）**：在「百关征途」页给出当前关卡**胜算 % / 平均回合 / 失败主因**（输出不足 / 生存不足 / 被反伤克制 / 被再生拖死 / 守卫暴击 / Boss 蓄力…），并**深拷贝玩家、临时施加某改动后重模拟、对比真实胜率**给出可执行建议（「强化兵刃 +X%」「装配防守心法 +Y%」「服聚元丹」「破境」「先做药王谷委托」…）——非假建议。纯函数 `domain.analyzeChallenge`，on-demand 计算（进页或点【重新推演】时算）不拖慢渲染。
+
+> 平衡旋钮集中在 `config.js → BALANCE.loadout / BALANCE.orders / BALANCE.tianji`；心法/禁忌数值在 `config/manuals.js`、委托数值在 `config/orders.js`。`dev/balance-sim` 实测 1~100 关与各流派胜率**基线零漂移**（sim 玩家走真实装配，初始拳法入槽）。
 
 ## 本地预览
 
@@ -130,7 +144,7 @@ npx serve .
 
 ## 存档说明
 
-存档键名 `wuxia_v6_full_save`（沿用旧版，老存档兼容）。当前 `SAVE_VERSION = 5`（v5 新增百世轮回 `run`/`legacies`）。结构变更时在 `src/storage.js` 的 `migrate()` / `normalizePlayer()` 内按 `saveVersion` 逐步升级 + 默认值兜底，旧档不会损坏（缺 `run`/`legacies` 等新字段会自动补全，旧档加载后处于「未入轮回」态，打开「百世轮回」页点【开启第一世】即可，原有进度不受影响）。导入/导出存档同样走 `normalizePlayer`，旧档导入不炸。
+存档键名 `wuxia_v6_full_save`（沿用旧版，老存档兼容）。当前 `SAVE_VERSION = 8`（v8 新增秘籍装配 `loadout` / 江湖委托 `orders` / 派系声望 `reputation`；v7 历世记录 / v6 地图词缀·黑市刷新 / v5 百世轮回 `run`/`legacies`）。结构变更时在 `src/storage.js` 的 `migrate()` / `normalizePlayer()` 内按 `saveVersion` 逐步升级 + 默认值兜底，旧档不会损坏（缺 `loadout`/`orders`/`reputation`/`run` 等新字段会自动补全；旧档加载时还会自动配招「最强主动 1 + 被动 3」，老玩家不会因装配系统骤弱）。导入/导出存档同样走 `normalizePlayer`，旧档导入不炸。
 
 ## 致谢与声明
 

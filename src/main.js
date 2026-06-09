@@ -6,10 +6,11 @@
 import { state } from './state.js';
 import { epicStory, BALANCE } from './config.js';
 import { loadGame, saveGame } from './storage.js';
+import { ensureLoadout } from './domain.js';
 import {
     initTooltipEvent, hideTooltip, switchPage,
     updatePlayerAttributes, renderForge, renderBag,
-    renderMapList, renderPlayerSkills, rollShopGoods, initShopGoods,
+    renderMapList, renderPlayerSkills, renderLoadout, renderTianji, rollShopGoods, initShopGoods,
     renderProduction, renderWarehouse, selectCraftTier, selectCraftAffix,
     toggleMenu, closeMenu
 } from './ui/render.js';
@@ -24,7 +25,8 @@ import {
     useBagItem, upgradePlayerSkill, buyShopItem, buyShopSkill, learnAllSkills, forgetSkill, refreshShop,
     enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
     exportSaveFile, importSaveFile, buyBagSlot, takePill,
-    claimGuideQuestReward, recordShopVisit, selectCultivationPath, buyShopMaterial
+    claimGuideQuestReward, recordShopVisit, selectCultivationPath, buyShopMaterial,
+    equipLoadout, unequipLoadout, submitOrder, refreshOrders
 } from './actions.js';
 import { renderRunPage, beginRoguelite, enterNode, setTactic, manualRebirth, advanceRegionAction, ascendEnding, renderCodex } from './ui/run.js';
 
@@ -40,6 +42,7 @@ function finalizeCharacter() {
         player.skills.push({ id: "s_init", name: "太祖长拳", type: "active", level: 1, baseRate: 0.35, power: 1.3, desc: "入门拳法，造成[伤害]倍输出。" });
     }
     if (player.honghuangPower === undefined) player.honghuangPower = 0;
+    ensureLoadout(player);   // 新角色：把初始太祖长拳自动装入主动槽，确保开局有招可用
     showStory();
 }
 
@@ -85,6 +88,7 @@ function initGameCore() {
     renderBag();
     renderMapList();
     renderPlayerSkills();
+    renderLoadout();
     renderProduction();
     renderWarehouse();
     renderRunPage();   // 百世轮回主页（默认首页）
@@ -103,7 +107,7 @@ function onDelegatedClick(e) {
     switch (el.dataset.act) {
         case 'finalize-character': finalizeCharacter(); break;
         case 'enter-game': enterGame(); break;
-        case 'switch-page': switchPage(el.dataset.page, el); if (el.dataset.page === 'shop') recordShopVisit(); if (el.dataset.page === 'run') renderRunPage(); if (el.dataset.page === 'codex') renderCodex(); break;
+        case 'switch-page': switchPage(el.dataset.page, el); if (el.dataset.page === 'shop') recordShopVisit(); if (el.dataset.page === 'run') renderRunPage(); if (el.dataset.page === 'codex') renderCodex(); if (el.dataset.page === 'orders') saveGame(); break;
         // —— 百世轮回 ——
         case 'roguelite-begin': beginRoguelite(); break;
         case 'roguelite-node': enterNode(el.dataset.node); break;
@@ -138,6 +142,11 @@ function onDelegatedClick(e) {
         case 'upgrade-skill': upgradePlayerSkill(Number(el.dataset.idx)); break;
         case 'forget-skill': forgetSkill(Number(el.dataset.idx)); break;
         case 'learn-all': learnAllSkills(); break;
+        case 'equip-loadout': equipLoadout(el.dataset.kind, el.dataset.id); break;
+        case 'unequip-loadout': unequipLoadout(el.dataset.kind, el.dataset.id); break;
+        case 'submit-order': submitOrder(el.dataset.uid); break;
+        case 'refresh-orders': refreshOrders(); break;
+        case 'run-tianji': renderTianji(); break;
         case 'buy-item': buyShopItem(Number(el.dataset.idx)); break;
         case 'buy-skill': buyShopSkill(Number(el.dataset.idx)); break;
         case 'buy-material': buyShopMaterial(Number(el.dataset.idx)); break;

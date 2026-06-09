@@ -279,6 +279,8 @@ export function startLife(player, lifepathId, { nextLife = false } = {}) {
         tempBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }
     };
     player.run = run;
+    // 第四阶段·新一世：江湖委托刷新罚则重置（反无限刷新跨世累积；委托内容与声望本身跨世保留）
+    if (player.orders && typeof player.orders === 'object') { player.orders.refreshCount = 0; player.orders.lastRefreshAt = 0; }
     // 重置本世黑市计数（goods 清空、per-life 刷新次数/购书/购装归零）
     if (!player.shop || typeof player.shop !== 'object') {
         player.shop = { goods: [], refreshCount: 0, lastRefreshAt: 0, lifeRefreshCount: 0, booksBoughtThisLife: 0, gearBoughtThisLife: 0 };

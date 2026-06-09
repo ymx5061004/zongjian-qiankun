@@ -5,8 +5,11 @@
 // ============================================================
 import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS, CULTIVATION_PATHS, CRAFT_AFFIXES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getGameplayAdvice, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById, getMapModifierBrief, getBossPlan, getPathRecommendations, getStageAssessment, getNextUnlock, materialSourceHint, shopRefreshCost, decayedRefreshSteps } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getGameplayAdvice, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById, getMapModifierBrief, getBossPlan, getPathRecommendations, getStageAssessment, getNextUnlock, materialSourceHint, shopRefreshCost, decayedRefreshSteps, getCombatSkills, skillSlotKind, ensureLoadout, analyzeChallenge } from '../domain.js';
 import { getModifiers } from '../run.js';
+import { HEART_ARTS, FORBIDDEN_ARTS, getHeartArt, getForbiddenArt } from '../config/manuals.js';
+import { FACTION_LIST, getFaction } from '../config/orders.js';
+import { ensureOrders, canSubmitOrder, orderRefreshSteps, orderRefreshCost, reputationLabel, missingText } from '../orders.js';
 import { formatNumber } from '../util.js';
 import { renderAchievementPanel } from './achievement.js';
 
@@ -579,6 +582,8 @@ export function renderBag() {
 // ---------- 秘籍列表 ----------
 export function renderPlayerSkills() {
     const player = state.player;
+    ensureLoadout(player);
+    const lo = player.loadout;
     const box = document.getElementById('player-skills-box');
     box.innerHTML = "";
     player.skills.forEach((sk, index) => {
@@ -600,13 +605,72 @@ export function renderPlayerSkills() {
             eff = `功法被动 · ${parts.length ? parts.join('　') : '点 🔍 查看功效'}`;
         }
 
+        // —— 第四阶段·秘籍装配：携带状态徽标 + 装配/卸下按钮（洪荒恒生效，不可装/卸）——
+        const kind = skillSlotKind(sk);
+        const equipped = kind === 'honghuang' || (kind === 'active' && lo.active === sk.id) || (kind === 'passive' && lo.passives.includes(sk.id));
+        const equipTag = equipped ? ` <span style="font-size:11px;color:var(--color-success);">⚙携带中</span>` : '';
+        let equipBtn = '';
+        if (kind === 'honghuang') equipBtn = '';
+        else if (equipped) equipBtn = `<button class="btn" data-act="unequip-loadout" data-kind="${kind}" data-id="${sk.id}">卸下</button>`;
+        else equipBtn = `<button class="btn btn-success" data-act="equip-loadout" data-kind="${kind}" data-id="${sk.id}">装配${kind === 'active' ? '主动' : '被动'}</button>`;
+
         const tip = tipAttr({ kind: 'skill', sk }); // 详情卡数据；tipAttr 转义单引号，避免洪荒 desc 截断属性
         const upgradeBtn = `<button class="btn" ${sk.level >= maxLevel ? 'disabled' : ''} data-act="upgrade-skill" data-idx="${index}">${sk.level >= maxLevel ? '已至化境' : `潜心研习(耗${formatNumber(cost)}修为)`}</button>`;
         // 仅「主动招式」可遗忘（精简主动技池、提高强招触发率）；被动/洪荒不显示遗忘按钮。
         const forgetBtn = (sk.type === 'active' && !isHH) ? `<button class="btn btn-danger" style="padding:8px 10px;" data-act="forget-skill" data-idx="${index}">遗忘</button>` : '';
-        card.innerHTML = `<div><span data-tip='${tip}' style="cursor:help;"><strong class="${isHH ? 'q-hh' : ''}">《${sk.name}》 🔍</strong></span> <span style="color:var(--color-gold);">[第${sk.level}/${maxLevel}重]</span><br><small style="color:var(--text-muted)">${eff}</small></div><div class="skill-btns">${upgradeBtn}${forgetBtn}</div>`;
+        card.innerHTML = `<div><span data-tip='${tip}' style="cursor:help;"><strong class="${isHH ? 'q-hh' : ''}">《${sk.name}》 🔍</strong></span> <span style="color:var(--color-gold);">[第${sk.level}/${maxLevel}重]</span>${equipTag}<br><small style="color:var(--text-muted)">${eff}</small></div><div class="skill-btns">${equipBtn}${upgradeBtn}${forgetBtn}</div>`;
         box.appendChild(card);
     });
+}
+
+// ---------- 秘籍装配（第四阶段）：装配摘要(4 槽) + 心法/禁忌候选。主动/被动的装配入口在上方秘籍卡。----------
+export function renderLoadout() {
+    const box = document.getElementById('loadout-box');
+    if (!box) return;
+    const player = state.player;
+    ensureLoadout(player);
+    const lo = player.loadout, L = BALANCE.loadout;
+    const skills = Array.isArray(player.skills) ? player.skills : [];
+    const byId = id => skills.find(s => s.id === id);
+    const hh = skills.find(s => s.isHongHuang);
+
+    // 已装配槽位摘要
+    const slotLine = (icon, label, cap, cur, body) =>
+        `<div style="margin-bottom:6px;"><span style="color:var(--color-gold);font-weight:bold;">${icon} ${label}</span> <span style="font-size:11px;color:var(--text-muted);">${cur}/${cap}</span><div style="margin-top:2px;font-size:12px;line-height:1.8;">${body}</div></div>`;
+    const skChip = id => { const s = byId(id); if (!s) return '<span style="color:var(--text-muted);">空</span>'; return `<span style="color:#ddd;">《${s.name}》</span> <small style="color:#9bbcd8;">${skillBrief(s)}</small> <button class="btn" style="padding:1px 7px;font-size:11px;" data-act="unequip-loadout" data-kind="${skillSlotKind(s)}" data-id="${id}">卸</button>`; };
+    const artChip = (kind, art) => { if (!art) return '<span style="color:var(--text-muted);">空</span>'; const pen = (art.penalties && art.penalties.length) ? ` <small style="color:var(--color-accent);">代价 ${art.penalties.join('·')}</small>` : ''; return `<span style="color:var(--color-gold);">${art.icon}${art.name}</span> <small style="color:#9bbcd8;">${(art.bonuses || []).join('·')}</small>${pen} <button class="btn" style="padding:1px 7px;font-size:11px;" data-act="unequip-loadout" data-kind="${kind}" data-id="${art.id}">卸</button>`; };
+
+    const passBody = lo.passives.length ? lo.passives.map(skChip).join('<br>') : '<span style="color:var(--text-muted);">空</span>';
+    const summary = `<div class="act-card" style="margin-bottom:10px;">
+        <div class="act-head"><span class="act-title">🎒 当前装配</span><span style="font-size:11px;color:var(--text-muted)">更换不耗资源 · 战力即时生效</span></div>
+        <div style="margin-top:8px;">
+            ${slotLine('⚔️', '主动', L.activeSlots, lo.active ? 1 : 0, skChip(lo.active))}
+            ${slotLine('🛡️', '被动', L.passiveSlots, lo.passives.length, passBody)}
+            ${slotLine('☯️', '心法', L.heartSlots, lo.heart ? 1 : 0, artChip('heart', getHeartArt(lo.heart)))}
+            ${slotLine('☠️', '禁忌', L.forbiddenSlots, lo.forbidden ? 1 : 0, artChip('forbidden', getForbiddenArt(lo.forbidden)))}
+        </div>
+        ${hh ? `<div class="act-meta" style="color:var(--color-honghuang);margin-top:4px;">☯ 《${hh.name}》恒生效·不占槽（五维总量 +${(hh.level || 0) * 2}%）</div>` : ''}
+        <div class="act-meta" style="margin-top:4px;color:var(--text-muted);">主动/被动在下方「百门绝学宝库」每张秘籍卡上【装配】；心法/禁忌在此选择 ⬇</div>
+    </div>`;
+
+    // 心法 / 禁忌 候选
+    const candList = (title, color, arts, kind, curId) => {
+        const rows = arts.map(a => {
+            const locked = player.realmLevel < (a.unlockRealmLevel || 1);
+            const on = curId === a.id;
+            const pen = (a.penalties && a.penalties.length) ? ` · <span style="color:var(--color-accent)">代价 ${a.penalties.join('·')}</span>` : '';
+            const eff = `${(a.bonuses || []).join('·')}${pen}`;
+            const btn = on ? `<button class="btn" style="padding:2px 10px;font-size:11px;" data-act="unequip-loadout" data-kind="${kind}" data-id="${a.id}">✓已装·卸下</button>`
+                : locked ? `<button class="btn" disabled style="padding:2px 10px;font-size:11px;">🔒${getRealmName(a.unlockRealmLevel)}</button>`
+                    : `<button class="btn btn-success" style="padding:2px 10px;font-size:11px;" data-act="equip-loadout" data-kind="${kind}" data-id="${a.id}">装配</button>`;
+            return `<div class="prop-row" style="align-items:center;${on ? 'border-color:rgba(46,204,113,0.4);background:rgba(46,204,113,0.06);' : ''}"><span style="flex:1;"><b style="color:var(--color-gold);">${a.icon} ${a.name}</b><br><small style="color:#bbb;">${a.desc}</small><br><small>${eff}</small></span>${btn}</div>`;
+        }).join('');
+        return `<div class="act-card" style="margin-bottom:10px;"><div class="act-head"><span class="act-title" style="color:${color}">${title}</span></div><div style="margin-top:6px;">${rows}</div></div>`;
+    };
+
+    box.innerHTML = summary
+        + candList('☯️ 心法 · 择一改变成长方向', 'var(--color-blue)', HEART_ARTS, 'heart', lo.heart)
+        + candList('☠️ 禁忌秘籍 · 强收益但有代价（可不带）', 'var(--color-honghuang)', FORBIDDEN_ARTS, 'forbidden', lo.forbidden);
 }
 
 // ---------- 生产技能页（采矿 / 锻造…通用，数据来自 config.ACTIVITIES）----------
@@ -925,10 +989,11 @@ export function switchPage(pageId, tabEl) {
     closeMenu();   // 移动端：点菜单项后收起抽屉
     if (pageId === 'quest') renderQuestPanel();
     if (pageId === 'path') renderPathPage();
+    if (pageId === 'orders') renderOrdersPage();
     if (pageId === 'role' || pageId === 'bag') updatePlayerAttributes();
-    if (pageId === 'kungfu') renderPlayerSkills();
+    if (pageId === 'kungfu') { renderPlayerSkills(); renderLoadout(); }
     if (pageId === 'shop') { renderBagExpand(); renderShopGoods(); }
-    if (pageId === 'adventure') renderMapList();
+    if (pageId === 'adventure') { renderMapList(); renderTianji(); }
     if (pageId === 'bag') { renderForge(); renderBag(); } // renderBag：补刷挂机期间打造入袋的装备
     if (pageId === 'achievement') renderAchievementPanel();
     if (pageId === 'guide') renderGuide();
@@ -1110,6 +1175,93 @@ export function renderPathPage() {
     box.innerHTML = head +
         `<div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin:12px 0 8px;">首次择道免费；之后改换门庭按已切换次数递增碎银（确认后扣费，属性即时更替）。流派加成与代价已计入面板战力。<br>下方「💡 适配你的现状」依据你当前的装备 / 属性 / 卡点给出参考，<b>仅供建议，不会替你选择</b>。</div>` +
         cards;
+}
+
+// ---------- 江湖委托 / 宗门订单（第四阶段）：派系声望条 + 3 委托卡 + 刷新 ----------
+export function renderOrdersPage() {
+    const box = document.getElementById('orders-content');
+    if (!box) return;
+    const player = state.player;
+    ensureOrders(player);
+    const now = Date.now();
+    const steps = orderRefreshSteps(player.orders, now);
+    const cost = orderRefreshCost(steps);
+    const rep = player.reputation || {};
+
+    // —— 派系声望条 ——
+    const repChips = FACTION_LIST.map(f => {
+        const v = rep[f.id] || 0;
+        return `<span title="${f.desc}" style="display:inline-block;background:#101820;border:1px solid var(--border-color);border-radius:12px;padding:3px 10px;margin:3px;font-size:12px;">${f.icon} ${f.name} <b style="color:${f.tone};">${v}</b>/${BALANCE.orders.repMax} <small style="color:var(--text-muted);">${reputationLabel(v)}</small></span>`;
+    }).join('');
+    const head = `<div class="act-card" style="margin-bottom:12px;">
+        <div class="act-head"><span class="act-title">🏯 派系声望</span>
+            <button class="btn" data-act="refresh-orders">🔄 刷新委托（${formatNumber(cost)}文）</button></div>
+        <div style="margin-top:8px;">${repChips}</div>
+        <div class="act-meta" style="margin-top:6px;color:var(--text-muted);">声望越高，该派委托的碎银/物料奖励越丰、并浮现稀有/史诗委托。累计达成 ${player.orders.completedCount || 0} 次。</div>
+    </div>`;
+
+    // —— 委托卡 ——
+    const rarityTag = { common: ['寻常', 'var(--text-muted)'], rare: ['稀有', 'var(--color-blue)'], epic: ['史诗', 'var(--color-orange)'] };
+    const cards = (player.orders.active || []).map(o => {
+        const f = getFaction(o.faction) || { name: '', icon: '', tone: 'var(--color-gold)' };
+        const chk = canSubmitOrder(player, o);
+        const [rl, rc] = rarityTag[o.rarity] || rarityTag.common;
+        const reqParts = [];
+        for (const [k, need] of Object.entries(o.req.materials || {})) {
+            const have = (player.materials || {})[k] || 0;
+            reqParts.push(`<span style="color:${have >= need ? 'var(--color-success)' : 'var(--color-accent)'}">${matName(k)} ${have}/${need}</span>`);
+        }
+        if (o.req.coin) reqParts.push(`<span style="color:${(player.coin || 0) >= o.req.coin ? 'var(--color-success)' : 'var(--color-accent)'}">碎银 ${formatNumber(o.req.coin)}</span>`);
+        const rwParts = [];
+        if (o.reward.coin) rwParts.push(`碎银+${formatNumber(o.reward.coin)}`);
+        if (o.reward.exp) rwParts.push(`修为+${formatNumber(o.reward.exp)}`);
+        if (o.reward.honghuangPower) rwParts.push(`洪荒+${o.reward.honghuangPower}`);
+        if (o.reward.materials) for (const [k, q] of Object.entries(o.reward.materials)) rwParts.push(`${matName(k)}×${q}`);
+        if (o.reward.reputation) rwParts.push(`<span style="color:${f.tone}">${f.name}声望+${o.reward.reputation}</span>`);
+        let karma = o.reward.karma || 0; if (o.faction === 'blackmarket') karma += BALANCE.orders.blackmarketKarmaPerSubmit;
+        const karmaTag = karma ? `<span style="color:${karma > 0 ? 'var(--color-accent)' : 'var(--color-success)'}">因果${karma > 0 ? '+' : ''}${karma}</span>` : '';
+        const btn = chk.ok
+            ? `<button class="btn btn-success" data-act="submit-order" data-uid="${o.uid}">交付</button>`
+            : `<button class="btn" disabled title="尚缺 ${missingText(chk.missing)}">材料不足</button>`;
+        return `<div class="act-card" style="margin-bottom:10px;">
+            <div class="act-head"><span class="act-title">${f.icon} ${f.name} · ${o.title}</span><span style="font-size:11px;color:${rc};">【${rl}】</span></div>
+            <div class="act-meta" style="font-size:12px;color:#bbb;margin-top:2px;">${o.desc}</div>
+            <div class="act-meta" style="margin-top:6px;">📦 需求：${reqParts.join('　') || '—'}</div>
+            <div class="act-meta" style="color:#8fb8e0;">🎁 酬谢：${rwParts.join('　')}${karmaTag ? '　' + karmaTag : ''}</div>
+            <div style="display:flex;justify-content:flex-end;margin-top:8px;">${btn}</div>
+        </div>`;
+    }).join('');
+
+    box.innerHTML = head + (cards || `<div class="act-card" style="text-align:center;color:var(--text-muted);">暂无委托，点【刷新委托】招募。</div>`);
+}
+
+// ---------- 天机推演（第四阶段）：胜算 + 失败主因 + 模拟对比建议（on-demand，进冒险页或点【重新推演】时算）----------
+const DANGER_TIANJI = { safe: ['🟢 稳进', 'var(--color-success)'], risky: ['🟡 凶险', 'var(--color-gold)'], deadly: ['🔴 死局', 'var(--color-accent)'], unknown: ['⚪ 未知', 'var(--text-muted)'] };
+export function renderTianji() {
+    const box = document.getElementById('tianji-panel');
+    if (!box) return;
+    let a;
+    try { a = analyzeChallenge(state.player); } catch (e) { a = { ok: false }; }
+    if (!a || !a.ok) {
+        box.innerHTML = `<div class="act-card" style="margin-bottom:0;"><div class="act-head"><span class="act-title">🔮 天机推演</span></div><div class="act-meta" style="color:var(--text-muted);margin-top:4px;">天机蒙尘：暂无可推演目标（先在百关征途打一场）。</div></div>`;
+        return;
+    }
+    const [dl, dc] = DANGER_TIANJI[a.danger] || DANGER_TIANJI.unknown;
+    const sugg = (a.suggestions || []).map(s =>
+        `<div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-top:1px solid rgba(255,255,255,0.06);">
+            <span style="flex:1;font-size:13px;color:#ddd;line-height:1.5;">· ${s.text}${s.gain != null ? ` <b style="color:var(--color-success);">（胜算 +${s.gain}%）</b>` : ''}</span>
+            ${s.page ? `<button class="btn" style="padding:3px 12px;flex:none;" data-act="switch-page" data-page="${s.page}">前往</button>` : ''}
+        </div>`).join('');
+    box.innerHTML = `<div class="act-card" style="margin-bottom:0;border:1px solid var(--color-honghuang);background:rgba(255,51,102,0.04);">
+        <div class="act-head"><span class="act-title">🔮 天机推演 · ${a.targetName}</span>
+            <button class="btn" style="padding:3px 10px;" data-act="run-tianji">↻ 重新推演</button></div>
+        <div class="act-meta" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:2px 16px;">
+            <span>胜算 <b style="color:${dc};">${Math.round(a.winRate * 100)}%</b> ${dl}</span>
+            <span>预计平均 <b style="color:var(--color-gold);">${a.avgRounds.toFixed(1)}</b> 回合</span>
+        </div>
+        <div class="act-meta" style="color:#e0b0b0;margin-top:4px;">${a.causeText}</div>
+        <div style="margin-top:6px;"><div style="font-size:12px;color:var(--color-gold);font-weight:bold;">🧭 破局之策（模拟推演 · 估算收益）</div>${sugg}</div>
+    </div>`;
 }
 
 // ---------- 江湖秘典：游戏全机制说明（只读静态页）----------

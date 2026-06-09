@@ -8,6 +8,8 @@ import {
 } from './config.js';
 // 命格/轮回遗产 修正聚合（百世轮回）。run.js 仅依赖 config，本处单向依赖，无循环。
 import { getModifiers } from './run.js';
+// 第四阶段·秘籍装配：心法/禁忌图鉴（纯数据叶子，无环）。
+import { HEART_ART_MAP, FORBIDDEN_ART_MAP } from './config/manuals.js';
 const LEGENDARY_QUALITY = 5;
 
 // —— 境界名 ——
@@ -292,7 +294,7 @@ const ADVICE_CAP = 4;
 function estimateWinRateVs(player, enemy, env = null, samples = 5) {
     try {
         const { stats } = computeStats(player);
-        const skills = Array.isArray(player.skills) ? player.skills : [];
+        const skills = getCombatSkills(player);   // 诊断/天机与实战同源：仅「携带」的秘籍参战
         let win = 0;
         for (let i = 0; i < samples; i++) if (simulateBattle(stats, enemy, skills, env).win) win++;
         return win / samples;
@@ -611,6 +613,106 @@ export function getStageAssessment(player, mapId) {
     };
 }
 
+// ============================================================
+// 第四阶段·天机推演（卡关诊断增强）：胜算 / 失败主因细分 / 可执行建议(模拟对比·真实估算收益)。
+// 纯函数·只读：深拷贝 player 临时施加某改动，重模拟比胜率，给出真实估算收益（绝非假建议）。
+// 不碰 DOM；落地+UI 在 render.js。采样次数/建议条数见 BALANCE.tianji（on-demand 计算，勿过大以免拖慢）。
+// ============================================================
+// 多次模拟取详细统计（胜率/平均回合/受伤/阵亡回合/击杀回合）。与实战同源(getCombatSkills)。
+function sampleBattleStats(player, enemy, env, samples) {
+    let stats, skills;
+    try { stats = computeStats(player).stats; skills = getCombatSkills(player); } catch (e) { return null; }
+    let wins = 0, roundsSum = 0, deaths = 0, deathRoundSum = 0, kills = 0, killRoundSum = 0, dmgTakenSum = 0;
+    for (let i = 0; i < samples; i++) {
+        const r = simulateBattle(stats, enemy, skills, env);
+        const lastR = r.events.length ? r.events[r.events.length - 1].round : 0;
+        if (r.win) wins++;
+        roundsSum += lastR; dmgTakenSum += r.dmgTaken || 0;
+        if (r.remainingHp <= 0) { deaths++; deathRoundSum += lastR; }
+        if (r.enemyDead) { kills++; killRoundSum += lastR; }
+    }
+    return {
+        winRate: wins / samples, avgRounds: roundsSum / samples, avgDmgTaken: dmgTakenSum / samples,
+        deaths, avgDeathRound: deaths ? deathRoundSum / deaths : 0,
+        kills, avgKillRound: kills ? killRoundSum / kills : 0
+    };
+}
+
+// 失败主因分类（综合 模拟统计 + 敌人词条/机制 + 解析式缺口 diagnoseCombat）。≥6 类来源。
+function classifyChallengeCause(st, enemy, env, diag) {
+    const cap = BALANCE.battle.maxRounds;
+    if (st.winRate >= 0.85) return { key: 'none', text: '战力充裕，此战可稳进。' };
+    if ((enemy.regenPct || 0) > 0 && st.kills <= st.deaths) return { key: 'regen', text: `败因：敌附【再生】，${cap} 回合内难斩杀、被其回血拖死——需提高爆发速杀。` };
+    if ((enemy.thornsPct || 0) > 0 && st.deaths > 0 && st.avgDeathRound <= cap * 0.6) return { key: 'thorns', text: '败因：敌附【荆棘反伤】，猛攻反噬自身——宜堆生存/减伤，忌一味拼输出。' };
+    if ((enemy.chargeEvery || 0) > 0 && st.deaths > 0) return { key: 'boss_charge', text: `败因：区域之主每 ${enemy.chargeEvery} 回合蓄力大招，未能在其爆发前压制或扛住。` };
+    if (((env && env.enemyCritChance) || 0) > 0 && st.deaths > 0 && st.avgDeathRound <= cap * 0.6) return { key: 'crit', text: '败因：此地守卫暴击凶猛，连遭重击而陨——宜堆气血/防御抗暴或速杀。' };
+    if (diag.deficit === 'survival') return { key: 'survival', text: `败因：约第 ${Math.max(1, Math.round(st.avgDeathRound || diag.roundsToDie))} 回合气血见底，生存缺口明显。` };
+    if (diag.deficit === 'attack') return { key: 'attack', text: `败因：${cap} 回合内难以斩杀（约需 ${diag.roundsToKill} 回合），输出不足。` };
+    return { key: 'balanced', text: '败因：势均力敌，略增战力或调整装配/策略即可破局。' };
+}
+
+// 候选改动（每条 apply 深拷贝后的 player，返回 true=改动成功）。覆盖 强化/心法/禁忌/丹药/破境 多源。
+function buildTianjiCandidates() {
+    const B = BALANCE;
+    return [
+        { text: '强化兵刃 +2（提输出）', page: 'enhance', apply: p => { const it = p.equips && (p.equips.weapon || p.equips.subweapon); if (!it) return false; it.enhance = Math.min(B.enhance.maxLevel, (it.enhance || 0) + 2); return true; } },
+        { text: '强化防具 +2（提生存）', page: 'enhance', apply: p => { for (const s of ['armor', 'helm', 'ring', 'artifact', 'amulet', 'boots', 'gloves']) { const it = p.equips && p.equips[s]; if (it) { it.enhance = Math.min(B.enhance.maxLevel, (it.enhance || 0) + 2); return true; } } return false; } },
+        { text: '装配心法《玄龟息壤功》（防御/减伤）', page: 'kungfu', apply: p => { if ((p.realmLevel || 1) < 8) return false; p.loadout = p.loadout || {}; if (p.loadout.heart === 'heart_guard') return false; p.loadout.heart = 'heart_guard'; return true; } },
+        { text: '装配心法《奔雷剑心》（攻击/暴伤）', page: 'kungfu', apply: p => { if ((p.realmLevel || 1) < 8) return false; p.loadout = p.loadout || {}; if (p.loadout.heart === 'heart_sword') return false; p.loadout.heart = 'heart_sword'; return true; } },
+        { text: '参修禁忌《血河禁卷》（暴伤暴涨·气血大损，赌）', page: 'kungfu', apply: p => { p.loadout = p.loadout || {}; if (p.loadout.forbidden === 'forbid_blood') return false; p.loadout.forbidden = 'forbid_blood'; return true; } },
+        { text: '服「聚元丹」补气血（炼丹或药王谷委托）', page: 'alchemy', apply: p => { p.pillBonus = p.pillBonus || {}; p.pillBonus.hp = (p.pillBonus.hp || 0) + 300; return true; } },
+        { text: '服「淬体丹」增攻击', page: 'alchemy', apply: p => { p.pillBonus = p.pillBonus || {}; p.pillBonus.atk = (p.pillBonus.atk || 0) + 80; return true; } },
+        { text: '破境提升境界（全属性质变）', page: 'role', apply: p => { p.realmLevel = (p.realmLevel || 1) + 1; p.baseHp += B.breakthrough.hpGain; p.baseAtk += B.breakthrough.atkGain; p.baseDef += B.breakthrough.defGain; return true; } }
+    ];
+}
+
+// 模拟对比给建议（每条带真实「胜算 +X%」）。末尾恒附对症静态建议(含委托/因果来源)，确保总有可执行的下一步。
+function suggestImprovements(player, enemy, env, baseWin, cause) {
+    const T = BALANCE.tianji;
+    const sim = [];
+    for (const c of buildTianjiCandidates()) {
+        let clone;
+        try { clone = JSON.parse(JSON.stringify(player)); } catch (e) { continue; }
+        let changed = false;
+        try { changed = c.apply(clone); } catch (e) { changed = false; }
+        if (!changed) continue;
+        ensureLoadout(clone);
+        const w = estimateWinRateVs(clone, enemy, env, T.samples);
+        if (w == null) continue;
+        const gain = Math.round((w - baseWin) * 100);
+        if (gain >= 2) sim.push({ text: c.text, gain, page: c.page });
+    }
+    sim.sort((a, b) => b.gain - a.gain);
+    const picked = sim.slice(0, Math.max(1, T.suggestCap - 2));
+    const fix = (cause.key === 'attack' || cause.key === 'regen')
+        ? '强化兵刃·升攻击系秘籍(真卷/杀诀)·提暴击；再生之敌须速杀'
+        : (cause.key === 'none' ? '战力充裕，可放心推进或挑战更高关卡'
+            : '强化防具/法宝·炼聚元丹(气血)·玄龟丹(防御)，或转体修');
+    picked.push({ text: fix, gain: null, page: 'enhance' });
+    picked.push({ text: '善用「江湖委托」：药王谷换聚元丹补血、铸剑山庄换锭强化', gain: null, page: 'orders' });
+    return picked;
+}
+
+// 天机推演入口（纯函数）：分析当前(或指定)百关关卡的 胜算/平均回合/失败主因/建议。无目标返回 {ok:false}。
+export function analyzeChallenge(player, mapId) {
+    if (!player || typeof player !== 'object') return { ok: false, reason: 'no_target' };
+    const T = BALANCE.tianji;
+    const id = Math.max(1, Math.min(MAP_NAMES.length, mapId || player.currentMapId || ((player.maxMapCleared || 0) + 1)));
+    let enemy, env, name;
+    try { enemy = finalizeEnemyStats(id); env = resolveMapEnv(id, player); name = `第 ${id} 关 · ${MAP_NAMES[id - 1] || '神秘禁区'}`; }
+    catch (e) { return { ok: false, reason: 'no_target' }; }
+    const st = sampleBattleStats(player, enemy, env, T.samples);
+    if (!st) return { ok: false, reason: 'no_target' };
+    const diag = diagnoseCombat(player, enemy, env, T.samples);
+    const cause = classifyChallengeCause(st, enemy, env, diag);
+    const suggestions = suggestImprovements(player, enemy, env, st.winRate, cause);
+    return {
+        ok: true, targetName: name, mapId: id,
+        winRate: st.winRate, avgRounds: st.avgRounds, danger: diag.danger,
+        cause: cause.key, causeText: cause.text, suggestions
+    };
+}
+
 // —— 生产页「下一解锁」：当前等级 / 距下一级经验 / 下一个解锁动作 / 当前活动产出（按 prof）——
 function activityOutputText(a) {
     if (!a) return '';
@@ -724,6 +826,98 @@ export function pathModifiers(player) {
     };
 }
 
+// ============================================================
+// 第四阶段·秘籍装配（loadout）：拥有 ≠ 携带。
+//   active/passives 引用「已拥有 skills 的 id」；heart/forbidden 引用「内置图鉴 id」(config/manuals.js)。
+//   洪荒功法(isHongHuang)恒生效、不占槽。纯逻辑：computeStats 据此过滤生效、simulateBattle 据此取主动技池。
+// ============================================================
+// 某门「已拥有秘籍」归属的装配槽类型：主动→active；洪荒→honghuang(恒生效·不入槽)；其余被动→passive。
+export function skillSlotKind(sk) {
+    if (!sk) return null;
+    if (sk.isHongHuang) return 'honghuang';
+    return sk.type === 'active' ? 'active' : 'passive';
+}
+
+// 被动秘籍「装配价值」粗评分（自动配招/排序用）：五维数值 + 战斗词条点数，× 重数。
+function passiveSkillScore(sk) {
+    if (!sk) return 0;
+    let s = 0;
+    ['hp', 'atk', 'def'].forEach(k => { if (sk[k]) s += Math.abs(sk[k]); });
+    ['crit', 'dodge', 'dropRate', 'coinRate'].forEach(k => { if (sk[k]) s += Math.abs(sk[k]) * 8; });
+    COMBAT_AFFIX_KEYS.forEach(k => { if (sk[k]) s += Math.abs(sk[k]) * 6; });
+    return s * (sk.level || 1);
+}
+
+// 校验/补全 loadout（幂等）：清理悬空/越类 id；旧档若 active/passives 全空而已有可装秘籍 →
+// 自动配「最强主动 1 + 最强被动 3」，避免老玩家骤弱。心法/禁忌默认留空（让玩家主动取舍）。洪荒恒生效、不进槽。
+export function ensureLoadout(player) {
+    if (!player || typeof player !== 'object') return null;
+    let lo = player.loadout;
+    if (!lo || typeof lo !== 'object') lo = player.loadout = { active: null, passives: [], heart: null, forbidden: null };
+    if (typeof lo.active !== 'string') lo.active = null;
+    if (!Array.isArray(lo.passives)) lo.passives = [];
+    if (typeof lo.heart !== 'string') lo.heart = null;
+    if (typeof lo.forbidden !== 'string') lo.forbidden = null;
+
+    const skills = Array.isArray(player.skills) ? player.skills : [];
+    const byId = new Map(skills.map(s => [s && s.id, s]));
+    const L = BALANCE.loadout;
+
+    // 清理悬空 / 越类 id
+    if (lo.active && (!byId.has(lo.active) || skillSlotKind(byId.get(lo.active)) !== 'active')) lo.active = null;
+    const seen = new Set();
+    lo.passives = lo.passives.filter(id => {
+        const sk = byId.get(id);
+        if (!sk || skillSlotKind(sk) !== 'passive' || seen.has(id)) return false;
+        seen.add(id); return true;
+    }).slice(0, L.passiveSlots);
+    if (lo.heart && !HEART_ART_MAP[lo.heart]) lo.heart = null;
+    if (lo.forbidden && !FORBIDDEN_ART_MAP[lo.forbidden]) lo.forbidden = null;
+
+    // 自动配招（仅在「该类槽全空」时；不抢占玩家已有选择）
+    if (!lo.active) {
+        const actives = skills.filter(s => skillSlotKind(s) === 'active');
+        if (actives.length) {
+            const sc = BALANCE.battle.activeLevelScale;
+            actives.sort((a, b) => ((b.power || 1) + (b.level || 1) * sc) - ((a.power || 1) + (a.level || 1) * sc));
+            lo.active = actives[0].id;
+        }
+    }
+    if (!lo.passives.length) {
+        const passives = skills.filter(s => skillSlotKind(s) === 'passive');
+        passives.sort((a, b) => passiveSkillScore(b) - passiveSkillScore(a));
+        lo.passives = passives.slice(0, L.passiveSlots).map(s => s.id);
+    }
+    return lo;
+}
+
+// 「携带进战斗」的 skills 子集（active 槽 + passives 槽 + 恒生效的洪荒）。
+//   无 loadout（dev 模拟器手搓的 player / 未经 normalize 的对象）→ 回退全量 skills，向后兼容、不破坏平衡基线。
+export function getCombatSkills(player) {
+    if (!player || !Array.isArray(player.skills)) return [];
+    const lo = player.loadout;
+    if (!lo || typeof lo !== 'object') return player.skills; // 兼容：无装配信息时全量生效（dev sim / 旧逻辑）
+    const ids = new Set();
+    if (lo.active) ids.add(lo.active);
+    if (Array.isArray(lo.passives)) lo.passives.forEach(id => ids.add(id));
+    return player.skills.filter(sk => sk && (ids.has(sk.id) || sk.isHongHuang)); // 洪荒恒生效
+}
+
+// 心法 + 禁忌 的「叠加层修正」聚合（与 pathModifiers 同构，折进 computeStats）。缺省全 0、未装配零影响。
+export function loadoutArtModifiers(player) {
+    const out = { mult: { hp: 0, atk: 0, def: 0 }, flat: { crit: 0, dodge: 0 }, affix: {} };
+    const lo = player && player.loadout;
+    if (!lo || typeof lo !== 'object') return out;
+    [HEART_ART_MAP[lo.heart], FORBIDDEN_ART_MAP[lo.forbidden]].forEach(art => {
+        if (!art || !art.mods) return;
+        const m = art.mods;
+        if (m.mult) ['hp', 'atk', 'def'].forEach(k => { if (Number.isFinite(m.mult[k])) out.mult[k] += m.mult[k]; });
+        if (m.flat) ['crit', 'dodge'].forEach(k => { if (Number.isFinite(m.flat[k])) out.flat[k] += m.flat[k]; });
+        if (m.affix) for (const k in m.affix) { if (Number.isFinite(m.affix[k])) out.affix[k] = (out.affix[k] || 0) + m.affix[k]; }
+    });
+    return out;
+}
+
 // —— 由 player 派生当前战斗属性。纯函数：返回 {stats, honghuangPower} ——
 export function computeStats(player) {
     const rebornMult = 1 + player.rebornCount * BALANCE.rebornMultPerCount;
@@ -731,6 +925,9 @@ export function computeStats(player) {
     // —— 修行流派数值（无派时全为零默认 → 下面各项恒等于原行为，旧档/未择道零影响）——
     const M = pathModifiers(player);
     const pm = M.mult, pf = M.flat;
+    // —— 第四阶段·秘籍装配：仅「携带」的秘籍生效（getCombatSkills）；心法/禁忌折成叠加层 art（缺省零影响）——
+    const combatSkills = getCombatSkills(player);
+    const art = loadoutArtModifiers(player);
     const skillM = 1 + M.skillMult / 100;     // 器修代价：被动秘籍五维收益 ×(1+skillMult%)
     const gearM = 1 + M.gearStatMult / 100;   // 器修：装备基础属性贡献 ×(1+gearStatMult%)
     const subM = 1 + M.subweaponMult / 100;   // 毒修：暗器(subweapon)贡献 ×(1+subweaponMult%)
@@ -750,7 +947,7 @@ export function computeStats(player) {
     let calcCrit = player.baseCrit + (pill.crit || 0) + (tmp.crit || 0);
     let calcDodge = player.baseDodge + (pill.dodge || 0) + (tmp.dodge || 0);
 
-    player.skills.forEach(sk => {
+    combatSkills.forEach(sk => {
         if (sk.type === 'passive') {
             // 器修代价：被动秘籍五维收益 ×skillM（无派 skillM=1 → 原值）。攻防血取整保持整数。
             if (sk.hp) calcHp += Math.floor(sk.hp * sk.level * skillM);
@@ -785,18 +982,18 @@ export function computeStats(player) {
     player.skills.forEach(sk => { if (sk.isHongHuang) honghuangPower = sk.level; });
     const hhMultiplier = 1 + (honghuangPower * BALANCE.honghuangMultPerLevel);
 
-    // 流派固定值：暴击/闪避「百分点」加成（与 pill/被动同层，pre-洪荒；无派为 0）。
-    calcCrit += pf.crit || 0;
-    calcDodge += pf.dodge || 0;
+    // 流派 + 心法/禁忌 固定值：暴击/闪避「百分点」加成（与 pill/被动同层，pre-洪荒；无派/未装配为 0）。
+    calcCrit += (pf.crit || 0) + art.flat.crit;
+    calcDodge += (pf.dodge || 0) + art.flat.dodge;
 
     // 流派百分比乘区：五维均 ×(1+mult%)，与洪荒同层叠乘（无派/未配该项为 ×1，恒等于原行为）。
     // 五维一致支持 mult（虽现有 5 派只对 暴击/闪避 用 flat 点数加成，但 mult.crit/mult.dodge 也生效，避免将来配置静默失效）。
     // 暴击/闪避最终钳到 ≥0，防代价把数值压成负；闪避另有 dodgeCap 硬上限。
     // 叠乘顺序：基础+被动+装备 → 洪荒 → 流派mult → 永久成就(abMul)。各层独立、缺省 ×1。
     const stats = {
-        hp: Math.floor(calcHp * hhMultiplier * (1 + (pm.hp || 0) / 100) * abMul('hp')),
-        atk: Math.floor(calcAtk * hhMultiplier * (1 + (pm.atk || 0) / 100) * abMul('atk')),
-        def: Math.floor(calcDef * hhMultiplier * (1 + (pm.def || 0) / 100) * abMul('def')),
+        hp: Math.floor(calcHp * hhMultiplier * (1 + (pm.hp || 0) / 100) * (1 + art.mult.hp / 100) * abMul('hp')),
+        atk: Math.floor(calcAtk * hhMultiplier * (1 + (pm.atk || 0) / 100) * (1 + art.mult.atk / 100) * abMul('atk')),
+        def: Math.floor(calcDef * hhMultiplier * (1 + (pm.def || 0) / 100) * (1 + art.mult.def / 100) * abMul('def')),
         crit: parseFloat(Math.max(0, calcCrit * hhMultiplier * (1 + (pm.crit || 0) / 100) * abMul('crit')).toFixed(1)),
         dodge: parseFloat(Math.max(0, Math.min(BALANCE.dodgeCap, calcDodge * hhMultiplier * (1 + (pm.dodge || 0) / 100) * abMul('dodge'))).toFixed(1)),
         dropRate: 100,
@@ -812,7 +1009,7 @@ export function computeStats(player) {
     stats.crit = parseFloat((stats.crit + mods.critAdd).toFixed(1));
     stats.dodge = parseFloat(Math.max(0, Math.min(BALANCE.dodgeCap, stats.dodge + mods.dodgeAdd)).toFixed(1));
 
-    player.skills.forEach(sk => {
+    combatSkills.forEach(sk => {
         if (sk.type === 'passive') {
             if (sk.dropRate) stats.dropRate += (sk.dropRate * sk.level);
             if (sk.coinRate) stats.coinRate += (sk.coinRate * sk.level);
@@ -826,13 +1023,15 @@ export function computeStats(player) {
     // 纯百分比，按「字段值 × 重数」线性叠加；不吃轮回/洪荒乘区（它们已是相对值，再乘会失控）。
     // 缺省全为 0 → 旧档/无词条玩家对战斗零影响。各 cap 在 simulateBattle 里收口。
     COMBAT_AFFIX_KEYS.forEach(k => { stats[k] = 0; });
-    player.skills.forEach(sk => {
+    combatSkills.forEach(sk => {
         if (sk.type === 'passive') {
             COMBAT_AFFIX_KEYS.forEach(k => { if (sk[k]) stats[k] += (sk[k] * sk.level); });
         }
     });
     // 流派词条加成（剑修暴伤 / 体修反震 / 身法先发 等）——叠加进对应词条池。
     COMBAT_AFFIX_KEYS.forEach(k => { if (pf[k]) stats[k] += pf[k]; });
+    // 心法/禁忌 词条加成（与秘籍/流派词条同字段累加；未装配 art.affix 为空 → 零影响）。
+    COMBAT_AFFIX_KEYS.forEach(k => { if (art.affix[k]) stats[k] += art.affix[k]; });
     // 毒修：把中毒参数随属性带入战斗（无派/非毒修为 null → simulateBattle 不触发中毒、零影响）。
     stats.poison = M.poison;
     // —— 第二阶段·本世奇珍/感悟 的「战斗词条增量」叠加（缺省 0；与秘籍词条/流派词条同字段累加，不影响旧档）——

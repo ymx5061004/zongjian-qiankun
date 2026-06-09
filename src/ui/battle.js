@@ -5,7 +5,7 @@
 import { state } from '../state.js';
 import { BALANCE, MAP_NAMES, GEAR_TIERS, MATERIALS } from '../config.js';
 import { formatNumber } from '../util.js';
-import { finalizeEnemyStats, simulateBattle, makeGearPiece, mapTier, rollQuality, unlockedGearSlots, getMapModifier, resolveMapEnv, getMapRewardMods, generateSkillByMatrix } from '../domain.js';
+import { finalizeEnemyStats, simulateBattle, getCombatSkills, makeGearPiece, mapTier, rollQuality, unlockedGearSlots, getMapModifier, resolveMapEnv, getMapRewardMods, generateSkillByMatrix } from '../domain.js';
 import { renderBag, renderMapList, updatePlayerAttributes } from './render.js';
 import { isDragging } from './drag.js';
 import { checkAchievementsAndNotify } from './achievement.js';
@@ -104,7 +104,7 @@ function executeLoopBattle(mapId) {
     const eSprite = document.getElementById('sprite-enemy');
 
     // 纯逻辑算出整场战斗，再按节奏演出（env=地图词缀战斗环境）
-    const { win, events, poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct } = simulateBattle(stats, enemy, player.skills, env);
+    const { win, events, poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct } = simulateBattle(stats, enemy, getCombatSkills(player), env);
 
     // —— 第四阶段·策略向成就统计累计（按战斗触发，非每帧扫描）——胜负皆累计的项目 ——
     if (!player.achievements) player.achievements = { unlocked: [], claimed: [], stats: {} };

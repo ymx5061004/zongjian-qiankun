@@ -323,6 +323,23 @@ export const BALANCE = {
         expMultCap: 1.6, gearDropMultRange: [0.5, 1.6], herbDropChanceCap: 0.35, skillDropChanceCap: 0.1
     },
 
+    // —— 第四阶段·秘籍装配（携带槽位上限；调手感只动这里）。洪荒功法恒生效、不占槽。——
+    loadout: { activeSlots: 1, passiveSlots: 3, heartSlots: 1, forbiddenSlots: 1 },
+
+    // —— 第四阶段·江湖委托/宗门订单（刷新费用几何递增 + 随时间衰减，反无限刷新；与黑市刷新同套路）——
+    orders: {
+        slots: 3,                          // 同时展示的委托数
+        refreshBase: 800, refreshGrowth: 1.7, refreshDecayMs: 120000, refreshMaxStep: 10, // 手动刷新：base×growth^step，空闲每 decayMs 回落一步
+        repMax: 100,                       // 单派声望上限
+        repRewardStep: 0.004,              // 每点声望 → 该派委托「碎银/物料」奖励 +0.4%（满 repMax → +40%）
+        rareRepReq: 35,                    // 稀有(rare)委托：需对应派系声望 ≥ 此值方可能出现
+        epicRepReq: 65,                    // 史诗(epic)委托：需对应派系声望 ≥ 此值
+        blackmarketKarmaPerSubmit: 1       // 交付黑市牙行委托：因果 +此值（在轮回中体现风险）
+    },
+
+    // —— 第四阶段·天机推演（卡关诊断的模拟采样次数 / 建议条数；on-demand 计算，勿调太大以免拖慢渲染）——
+    tianji: { samples: 10, suggestCap: 5 },
+
     // —— 百世轮回 Roguelite（节点战斗强度 / 寿元 / 节点收益，全在这一处调）——
     // ⚖️ 敌人强度针对「新角色基线(约 250血/35攻/15防)」调校：
     //   普通节点轻松、精英有风险、区域Boss 需积累战力或正确策略；老存档高战力玩家会碾压前期(设定使然)。
