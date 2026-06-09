@@ -104,7 +104,7 @@ function executeLoopBattle(mapId) {
     const eSprite = document.getElementById('sprite-enemy');
 
     // 纯逻辑算出整场战斗，再按节奏演出（env=地图词缀战斗环境）
-    const { win, events, poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct } = simulateBattle(stats, enemy, getCombatSkills(player), env);
+    const { win, events, poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct, buildSummary } = simulateBattle(stats, enemy, getCombatSkills(player), env);
 
     // —— 第四阶段·策略向成就统计累计（按战斗触发，非每帧扫描）——胜负皆累计的项目 ——
     if (!player.achievements) player.achievements = { unlocked: [], claimed: [], stats: {} };
@@ -114,6 +114,11 @@ function executeLoopBattle(mapId) {
     if (dodges) as.dodgeCount = (as.dodgeCount || 0) + dodges;                       // 踏雪无痕
     if (maxHit > (as.maxSingleHit || 0)) as.maxSingleHit = maxHit;                   // 孤注一掷
     if (curPath === 'body' && dmgTaken) as.bodyDamageTaken = (as.bodyDamageTaken || 0) + dmgTaken; // 铁骨横江
+    // —— 第五阶段·构筑机制触发计数（跨世累积；百关亦可触发剑势/毒蚀/守势/影步）——
+    if (buildSummary) {
+        if (!player.buildStats || typeof player.buildStats !== 'object') player.buildStats = { swordBreaks: 0, poisonBursts: 0, guardCounters: 0, afterimageHits: 0, overcharges: 0, bossBreaks: 0 };
+        for (const k of Object.keys(player.buildStats)) player.buildStats[k] += (buildSummary[k] || 0);
+    }
 
     events.forEach(ev => {
         const base = (ev.round - 1) * B.animStaggerMs;
@@ -159,6 +164,33 @@ function executeLoopBattle(mapId) {
                 spawnPopupEffect(false, `☠ -${formatNumber(ev.dmg)}`, false, true);
                 document.getElementById('sprite-e-hp').style.width = ev.eHpPct + "%";
             }, base + B.playerActionDelayMs + 60);
+        } else if (ev.side === 'sword') {
+            // 第五阶段·剑势破绽斩：橙色额外一击
+            setTimeout(() => {
+                spawnPopupEffect(false, `⚔️破绽 -${formatNumber(ev.dmg)}`, true);
+                document.getElementById('sprite-e-hp').style.width = ev.eHpPct + "%";
+            }, base + 40);
+        } else if (ev.side === 'poisonburst') {
+            // 第五阶段·毒蚀爆发：绿色真伤
+            setTimeout(() => {
+                spawnPopupEffect(false, `☠爆发 -${formatNumber(ev.dmg)}`, false, true);
+                document.getElementById('sprite-e-hp').style.width = ev.eHpPct + "%";
+            }, base + B.playerActionDelayMs + 80);
+            if (ev.round === 1 || ev.stacks) logBattle(`☠️ 毒蚀爆发，敌气血骤损 ${formatNumber(ev.dmg)}！`);
+        } else if (ev.side === 'afterimage') {
+            // 第五阶段·影步补刀：追加一击
+            setTimeout(() => {
+                spawnPopupEffect(false, `🪶残影 -${formatNumber(ev.dmg)}`, false);
+                document.getElementById('sprite-e-hp').style.width = ev.eHpPct + "%";
+            }, base + 60);
+        } else if (ev.side === 'guard') {
+            // 第五阶段·守势硬接：蓝色减伤提示 + 反震
+            setTimeout(() => {
+                spawnPopupEffect(true, `🛡️守势`, false);
+                if (ev.counter > 0) setTimeout(() => spawnPopupEffect(false, `反震 -${formatNumber(ev.counter)}`, false), 120);
+            }, base + B.playerActionDelayMs);
+        } else if (ev.side === 'overcharge') {
+            logBattle(`🔥 ${ev.text || '炉心过载'}`);
         } else { // evade：闪避 / 格挡 / 定身（text 决定文案）
             setTimeout(() => { spawnPopupEffect(true, ev.text || "闪避", false); }, base + B.playerActionDelayMs);
         }

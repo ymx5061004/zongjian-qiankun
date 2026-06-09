@@ -26,7 +26,8 @@ import {
     enhanceEquip, craftGear, challengeBoss, upgradeGear, sellMaterial,
     exportSaveFile, importSaveFile, buyBagSlot, takePill,
     claimGuideQuestReward, recordShopVisit, selectCultivationPath, buyShopMaterial,
-    equipLoadout, unequipLoadout, submitOrder, refreshOrders
+    equipLoadout, unequipLoadout, submitOrder, refreshOrders,
+    saveLoadoutPreset, applyLoadoutPreset, deleteLoadoutPreset
 } from './actions.js';
 import { renderRunPage, beginRoguelite, enterNode, setTactic, manualRebirth, advanceRegionAction, ascendEnding, renderCodex } from './ui/run.js';
 
@@ -144,6 +145,9 @@ function onDelegatedClick(e) {
         case 'learn-all': learnAllSkills(); break;
         case 'equip-loadout': equipLoadout(el.dataset.kind, el.dataset.id); break;
         case 'unequip-loadout': unequipLoadout(el.dataset.kind, el.dataset.id); break;
+        case 'save-preset': saveLoadoutPreset(); break;
+        case 'apply-preset': applyLoadoutPreset(Number(el.dataset.idx)); break;
+        case 'delete-preset': deleteLoadoutPreset(Number(el.dataset.idx)); break;
         case 'submit-order': submitOrder(el.dataset.uid); break;
         case 'refresh-orders': refreshOrders(); break;
         case 'run-tianji': renderTianji(); break;

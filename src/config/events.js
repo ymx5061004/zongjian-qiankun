@@ -15,6 +15,7 @@
 //   skill                 : true（随机秘籍入行囊）
 //   flag                  : { key: value } 写入 run.worldFlags（驱动后续 require）
 //   tactic                : 设为某策略（流派倾向引导）
+//   reputation            : { 派系id: 增量 }（第五阶段·事件链 payoff；内联增减，受 repMax 钳制）
 // choice.require（不满足则该选项灰显锁定）：{ karmaMin, karmaMax, flag, notFlag, minAtk }
 // ============================================================
 export const EVENTS = [
@@ -233,6 +234,162 @@ export const EVENTS = [
             { text: '焚香赎罪', require: { karmaMin: 5 }, effects: { karma: -5, hpNow: -30, exp: 600 }, resultText: '你长跪忏悔，血光渐敛，业力消解大半。' },
             { text: '广施阴德', effects: { coin: -1000, karma: -2 }, resultText: '散去部分钱财，结一段善缘。' },
             { text: '我命由我，不惧因果', effects: { stats: { atk: 6 }, karma: 2 }, resultText: '你直面业镜，杀意愈纯，然因果更深。' }
+        ]
+    },
+
+    // ============================================================
+    // 第五阶段·事件链（6 条短链，每条 3 步，用 worldFlags 串联；payoff 影响构筑机制/Boss 破招/派系声望）。
+    // step1 无 require（随处可遇）；step2/3 require 前置 flag；step2 两选项都置 step2-flag，确保链路可达。
+    // effects 支持 reputation:{派系:增量}（第五阶段新增，见 run.applyEventChoice）。
+    // ============================================================
+    // —— 1) 剑灵低语链（剑冢 · 剑势/青城/因果）——
+    {
+        id: 'jl_1', title: '剑灵低语·初闻', regionTags: ['jianzhong'],
+        desc: '断剑林深处，一缕剑灵附于折剑，低声试探你的剑心。',
+        choices: [
+            { text: '与剑灵立约，借其剑意', effects: { stats: { atk: 6 }, karma: 1, flag: { jl_whisper: true } }, resultText: '剑灵嗤笑入体，攻势更利，却也染上一缕戾气。' },
+            { text: '以自身剑诀印证，不沾因果', effects: { stats: { crit: 2 }, exp: 600 }, resultText: '你以剑诀回应，剑灵默然，留下一丝感悟。' }
+        ]
+    },
+    {
+        id: 'jl_2', title: '剑灵试炼', regionTags: ['jianzhong'],
+        desc: '剑灵引你入虚影剑冢，要你斩破万千心魔之剑。',
+        choices: [
+            { text: '凝神以剑势破阵', require: { flag: 'jl_whisper' }, effects: { stats: { atk: 5, crit: 2 }, flag: { jl_trial: true } }, resultText: '你以纯粹剑势破尽虚影，剑灵认可——剑势更盛。' },
+            { text: '借剑灵之力强渡', require: { flag: 'jl_whisper' }, effects: { hpNow: -50, karma: 2, runTalent: true, flag: { jl_trial: true } }, resultText: '你任剑灵之力贯体，险胜负反噬——得一门本世感悟。' }
+        ]
+    },
+    {
+        id: 'jl_3', title: '剑灵归宿', regionTags: ['jianzhong'],
+        desc: '剑灵执念已消，问你如何处置它残存的剑魂。',
+        choices: [
+            { text: '纳剑魂入鞘，承其剑道', require: { flag: 'jl_trial' }, effects: { stats: { atk: 8, crit: 3 }, reputation: { qingcheng: 8 }, karma: 1 }, resultText: '剑魂归鞘，青城闻讯结善缘——你的剑势臻于大成。' },
+            { text: '超度剑灵，了却千年执念', require: { flag: 'jl_trial' }, effects: { karma: -3, material: { soul_crystal: 1 }, exp: 1500 }, resultText: '你诵经超度，剑灵化光而散，遗下一枚剑魂结晶。' }
+        ]
+    },
+    // —— 2) 药王救疫链（云梦/万毒 · 药王谷/草药/低因果）——
+    {
+        id: 'yw_1', title: '瘟疫村落', regionTags: ['yunmeng', 'wandu'],
+        desc: '一座村落瘟疫横行，药王谷弟子焦头烂额地施救。',
+        choices: [
+            { text: '出手相助，分发草药', effects: { karma: -1, reputation: { yaowang: 4 }, flag: { yw_plague: true } }, resultText: '你协助施药，疫情稍缓，药王谷感念。' },
+            { text: '只求购解毒药材', effects: { coin: -600, material: { herb_2: 4 } }, resultText: '你买下几味珍贵药材便离去。' }
+        ]
+    },
+    {
+        id: 'yw_2', title: '寻药解疫', regionTags: ['yunmeng', 'wandu'],
+        desc: '要根治瘟疫，须寻一味生于毒地的解药引子。',
+        choices: [
+            { text: '深入毒地采药', require: { flag: 'yw_plague' }, effects: { hpNow: -40, material: { herb_3: 3 }, flag: { yw_cure: true } }, resultText: '你冒毒采得药引，虽受损伤，却离根治更近。' },
+            { text: '请药王谷高手坐镇', require: { flag: 'yw_plague' }, effects: { coin: -1000, exp: 800, flag: { yw_cure: true } }, resultText: '你重金请来药王谷高手，暂稳疫情。' }
+        ]
+    },
+    {
+        id: 'yw_3', title: '疫尽人安', regionTags: ['yunmeng', 'wandu'],
+        desc: '瘟疫终被压下，村民与药王谷皆来致谢。',
+        choices: [
+            { text: '受药王谷传授解毒之术', require: { flag: 'yw_cure' }, effects: { reputation: { yaowang: 10 }, karma: -3, permStats: { def: 8 } }, resultText: '药王谷倾囊相授解毒法门，体魄与善缘俱增（更易破万毒 Boss）。' },
+            { text: '功成身退，不求回报', require: { flag: 'yw_cure' }, effects: { karma: -4, reputation: { commoners: 6 }, exp: 1200 }, resultText: '你悄然离去，积下深厚善缘。' }
+        ]
+    },
+    // —— 3) 黑市债契链（任意区域 · 黑市声望/因果/天罚 Boss 风险）——
+    {
+        id: 'bm_1', title: '牙行密信',
+        desc: '一名黑市牙人塞来一封密信：「一笔横财，要不要？」',
+        choices: [
+            { text: '接下黑契，预支横财', effects: { coin: 3000, karma: 2, reputation: { blackmarket: 5 }, flag: { bm_debt: true } }, resultText: '你接过沉甸甸的钱袋——这笔债，迟早要还。' },
+            { text: '婉拒，不沾是非', effects: { karma: -1 }, resultText: '你摇头离去，牙人冷笑收信。' }
+        ]
+    },
+    {
+        id: 'bm_2', title: '黑契追加',
+        desc: '牙人再度现身：「上回的本钱，可愿翻倍再赌一注？」',
+        choices: [
+            { text: '加注，赌一场大的', require: { flag: 'bm_debt' }, effects: { coin: 5000, karma: 3, flag: { bm_due: true } }, resultText: '你押上身家，横财滚滚——业力也滚滚而来。' },
+            { text: '先还旧债，及时收手', require: { flag: 'bm_debt' }, effects: { coin: -2000, karma: -2, flag: { bm_due: true } }, resultText: '你结清旧账，牙人挑眉：「识相。」' }
+        ]
+    },
+    {
+        id: 'bm_3', title: '血债血偿',
+        desc: '黑契到期，债主带着杀气找上门来——是了结的时候了。',
+        choices: [
+            { text: '以武力镇压债主', require: { flag: 'bm_due', karmaMin: 5 }, effects: { hpNow: -80, coin: 4000, reputation: { blackmarket: 10 }, karma: 1 }, resultText: '你一战镇住债主，黑市敬你三分（高因果引天罚 Boss，慎之）。' },
+            { text: '散尽横财，消灾解业', require: { flag: 'bm_due' }, effects: { coin: -3000, karma: -5 }, resultText: '你散财消灾，业力大消，债主作罢。' }
+        ]
+    },
+    // —— 4) 炉心铸剑链（剑冢/万毒/天门 · 过载/锻材/铸剑山庄）——
+    {
+        id: 'forge_1', title: '古炉余烬', regionTags: ['jianzhong', 'wandu', 'tianmen'],
+        desc: '一座废弃古炉余烬未熄，似还能再燃一炉好钢。',
+        choices: [
+            { text: '添薪续火，淬炼好钢', effects: { material: { ingot_xuan: 3 }, reputation: { zhujian: 4 }, flag: { forge_spark: true } }, resultText: '你重燃古炉，炼得几锭好钢，铸剑山庄闻讯而至。' },
+            { text: '拆炉取材变卖', effects: { coin: 1500, karma: 1 }, resultText: '你拆炉换钱，铸剑师若知怕要痛心。' }
+        ]
+    },
+    {
+        id: 'forge_2', title: '淬火秘传', regionTags: ['jianzhong', 'wandu', 'tianmen'],
+        desc: '炉火中浮现一段铸剑山庄的淬火口诀。',
+        choices: [
+            { text: '参悟「炉心过载」火候', require: { flag: 'forge_spark' }, effects: { material: { ingot_cold: 2 }, exp: 1000, flag: { forge_temper: true } }, resultText: '你领悟过载淬火的火候真意，离器修大成更近。' },
+            { text: '默记口诀，留待日后', require: { flag: 'forge_spark' }, effects: { reputation: { zhujian: 5 }, flag: { forge_temper: true } }, resultText: '你默记口诀，铸剑山庄记你一份人情。' }
+        ]
+    },
+    {
+        id: 'forge_3', title: '神兵将成', regionTags: ['jianzhong', 'wandu', 'tianmen'],
+        desc: '古炉最后一燃，可成一件神兵——也可能炸炉。',
+        choices: [
+            { text: '倾力一铸（赌）', require: { flag: 'forge_temper' }, effects: { hpNow: -30, item: { tier: 5 }, reputation: { zhujian: 8 } }, resultText: '炉火冲天，你抢出一件神兵！铸剑山庄叹服（声望助炉心过载）。' },
+            { text: '稳妥收炉，积攒锻材', require: { flag: 'forge_temper' }, effects: { material: { ingot_star: 3, soul_crystal: 1 }, reputation: { zhujian: 5 } }, resultText: '你稳妥收炉，攒下珍贵锻材。' }
+        ]
+    },
+    // —— 5) 凡人香火链（任意区域 · 善缘/死亡结算保底/遗产）——
+    {
+        id: 'incense_1', title: '路旁土地庙',
+        desc: '一座香火零落的土地小庙，残破却供着几炷将熄的香。',
+        choices: [
+            { text: '添香火，许一愿', effects: { coin: -300, karma: -2, reputation: { commoners: 4 }, flag: { incense_vow: true } }, resultText: '你添了香油钱，村民感念，冥冥中似有庇佑。' },
+            { text: '歇脚片刻便走', effects: { hpNow: 40 }, resultText: '你在庙中歇息，气血微复。' }
+        ]
+    },
+    {
+        id: 'incense_2', title: '村民相赠',
+        desc: '几名村民认出你便是那添香之人，执意回赠心意。',
+        choices: [
+            { text: '坦然受礼，结此善缘', require: { flag: 'incense_vow' }, effects: { material: { herb_1: 8 }, coin: 800, reputation: { commoners: 6 }, flag: { incense_bless: true } }, resultText: '村民送上薄礼，善缘渐厚。' },
+            { text: '分赠村中老弱', require: { flag: 'incense_vow' }, effects: { karma: -3, reputation: { commoners: 4 }, flag: { incense_bless: true } }, resultText: '你将所得尽数分赠，善名远播。' }
+        ]
+    },
+    {
+        id: 'incense_3', title: '香火庇佑',
+        desc: '夜半梦中，土地神向你颔首：「善有善报，去吧。」',
+        choices: [
+            { text: '叩谢神恩', require: { flag: 'incense_bless' }, effects: { karma: -4, reputation: { commoners: 10 }, permStats: { hp: 15 } }, resultText: '你受土地庇佑，体魄微增、善缘深厚（陨落更轻、结算更易得遗产）。' },
+            { text: '回赠香火，广积阴德', require: { flag: 'incense_bless' }, effects: { coin: -1000, karma: -5, reputation: { commoners: 8 } }, resultText: '你广施香火，业障尽消。' }
+        ]
+    },
+    // —— 6) 雷劫问心链（天门 · 守势/影步/低因果）——
+    {
+        id: 'lj_1', title: '雷劫问心', regionTags: ['tianmen'],
+        desc: '天门古道雷云翻涌，一道心魔之声叩问你的道心。',
+        choices: [
+            { text: '凝神守心，硬抗雷音', effects: { stats: { def: 6 }, flag: { lj_ask: true } }, resultText: '你稳如磐石，心魔退散——守御之意更坚。' },
+            { text: '身随雷动，避其锋芒', effects: { stats: { dodge: 3 }, flag: { lj_ask: true } }, resultText: '你身形飘忽，雷音不能近身——身法更灵。' }
+        ]
+    },
+    {
+        id: 'lj_2', title: '问心三难', regionTags: ['tianmen'],
+        desc: '雷劫连发三问，每一问都直指你一路的杀伐与执念。',
+        choices: [
+            { text: '以低因果之身坦然受问', require: { flag: 'lj_ask', karmaMax: 0 }, effects: { karma: -2, exp: 1500, flag: { lj_resolve: true } }, resultText: '你心无挂碍，三问皆过，道心通明（低因果可破天门雷劫）。' },
+            { text: '以武止问，斩破心魔', require: { flag: 'lj_ask' }, effects: { hpNow: -60, stats: { atk: 6 }, karma: 1, flag: { lj_resolve: true } }, resultText: '你一剑斩破心魔，强渡此关。' }
+        ]
+    },
+    {
+        id: 'lj_3', title: '雷劫加身', regionTags: ['tianmen'],
+        desc: '最后一道天雷将落，是镇魔将临前的最后考验。',
+        choices: [
+            { text: '以守势硬接天雷', require: { flag: 'lj_resolve' }, effects: { permStats: { def: 6 }, stats: { def: 10 }, reputation: { zhujian: 5 } }, resultText: '你硬接天雷不退，守御之道大成（更易以守势破天门雷劫）。' },
+            { text: '以影步卸去雷势', require: { flag: 'lj_resolve' }, effects: { stats: { dodge: 5 }, karma: -2 }, resultText: '你借影步卸尽雷势，全身而退（更易以影步避雷劫）。' }
         ]
     }
 ];

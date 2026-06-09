@@ -4,12 +4,12 @@
 // 另含「加密导入导出」（文件末尾）：AES-GCM(固定密钥) 把存档导出为离线备份，
 // 仅作防篡改/防随手改档的混淆 —— 密钥就在前端源码里，非机密级保护。
 // ============================================================
-import { state, makeDefaultPlayer, makeDefaultRun, makeDefaultRecords, makeDefaultLoadout, makeDefaultOrders, makeDefaultReputation } from './state.js';
+import { state, makeDefaultPlayer, makeDefaultRun, makeDefaultRecords, makeDefaultLoadout, makeDefaultOrders, makeDefaultReputation, makeDefaultBuildStats, makeDefaultContract } from './state.js';
 import { SKILL_SUFFIXES, GEAR_SLOTS, PROFESSIONS } from './config.js';
 import { syncQuestProgress, ensureLoadout } from './domain.js';
 
 const SAVE_KEY = "wuxia_v6_full_save"; // 沿用原 key，兼容老存档
-const SAVE_VERSION = 8;                 // v8: 第四阶段 loadout(秘籍装配)/orders(江湖委托)/reputation(派系声望)（v7 records / v6 词缀·黑市 / v5 流派 / v4 指引）；补全在 normalizePlayer，旧档不炸
+const SAVE_VERSION = 9;                 // v9: 第五阶段 buildStats(构筑机制统计)/loadoutPresets(装配预设·预留)/run.contract(本世誓约·预留)/run.overchargeUsed(炉心过载次数)（v8 loadout/orders/reputation / v7 records / v6 词缀·黑市 / v5 流派 / v4 指引）；补全在 normalizePlayer，旧档不炸
 
 export function saveGame() {
     if (!state.player.name) return;
@@ -126,6 +126,34 @@ export function normalizePlayer(parsed) {
     ['completedCount', 'refreshCount', 'lastRefreshAt'].forEach(k => { if (!Number.isFinite(od[k]) || od[k] < 0) od[k] = 0; });
     if (!p.reputation || typeof p.reputation !== 'object') p.reputation = makeDefaultReputation();
     Object.keys(makeDefaultReputation()).forEach(k => { if (!Number.isFinite(p.reputation[k]) || p.reputation[k] < 0) p.reputation[k] = 0; });
+    // —— 第五阶段·构筑机制统计 / 装配预设 / 本世誓约 / 炉心过载次数 字段补全（v9 新增）——
+    if (!p.buildStats || typeof p.buildStats !== 'object') p.buildStats = makeDefaultBuildStats();
+    Object.keys(makeDefaultBuildStats()).forEach(k => { if (!Number.isFinite(p.buildStats[k]) || p.buildStats[k] < 0) p.buildStats[k] = 0; });
+    // 装配预设（最多 3 个）：逐条校验 name/loadout，并清理预设中已不存在的秘籍 id（dangling），缺字段不白屏。
+    if (!Array.isArray(p.loadoutPresets)) p.loadoutPresets = [];
+    const ownedSkillIds = new Set((Array.isArray(p.skills) ? p.skills : []).map(s => s && s.id));
+    p.loadoutPresets = p.loadoutPresets.filter(pr => pr && typeof pr === 'object').slice(0, 3).map(pr => {
+        const lo = (pr.loadout && typeof pr.loadout === 'object') ? pr.loadout : {};
+        return {
+            name: typeof pr.name === 'string' ? pr.name : '预设',
+            createdAt: Number.isFinite(pr.createdAt) ? pr.createdAt : 0,
+            loadout: {
+                active: (typeof lo.active === 'string' && ownedSkillIds.has(lo.active)) ? lo.active : null,
+                passives: Array.isArray(lo.passives) ? lo.passives.filter(id => ownedSkillIds.has(id)) : [],
+                heart: typeof lo.heart === 'string' ? lo.heart : null,
+                forbidden: typeof lo.forbidden === 'string' ? lo.forbidden : null
+            }
+        };
+    });
+    // 本世誓约 / 炉心过载次数（在 run 上；p.run 此前已确保为对象）
+    if (!p.run.contract || typeof p.run.contract !== 'object') p.run.contract = makeDefaultContract();
+    else {
+        const c = p.run.contract;
+        if (c.id !== null && typeof c.id !== 'string') c.id = null;
+        if (!c.progress || typeof c.progress !== 'object') c.progress = {};
+        c.failed = !!c.failed; c.completed = !!c.completed; c.claimed = !!c.claimed;
+    }
+    if (!Number.isFinite(p.run.overchargeUsed) || p.run.overchargeUsed < 0) p.run.overchargeUsed = 0;
     // 静默基线同步：填好 completed[] 与 activeId（不弹提示），避免旧档首个动作触发「一次性补发」的提示风暴。
     syncQuestProgress(player);
     // —— 修行流派字段补全（v5 新增）：旧档无 path 字段 → 默认未择道(null)，保持原始数值、不强制选择 ——

@@ -5,7 +5,7 @@
 // 纯规则在 run.js（不依赖 domain）；本模块负责把规则落地、实体化奖励(装备/秘籍)、演出与存档。
 // ============================================================
 import { state } from '../state.js';
-import { BALANCE, MATERIALS, PROFESSIONS } from '../config.js';
+import { BALANCE, MATERIALS, PROFESSIONS, GEAR_TIERS } from '../config.js';
 import { REGIONS, MODIFIER_MAP } from '../config/regions.js';
 import { TACTICS, getTactic } from '../config/tactics.js';
 import { LIFEPATHS, getLifepath } from '../config/lifepaths.js';
@@ -16,12 +16,15 @@ import {
     getModifiers, rollLifepathChoices, rollLegacyChoices, rollRunTalentChoices, grantRunTalent,
     startLife, advanceRegion, grantLegacy, currentRegion, currentRegionIndex, nodeById, reachableNodeIds,
     finalizeNodeEnemy, vsBonusPctFor, nodeAgeCost, pickEventForNode, markEventSeen, choiceAvailable,
-    applyEventChoice, planNodeReward, settleLife, applyDeathPenalty, clampHp, isLifeActive, NODE_TYPE_INFO
+    applyEventChoice, planNodeReward, settleLife, applyDeathPenalty, clampHp, isLifeActive, NODE_TYPE_INFO,
+    rollContractChoices, setContract, noteContract, contractStatus
 } from '../run.js';
-import { computeStats, simulateBattle, getCombatSkills, makeGearPiece, generateSkillByMatrix, unlockedGearSlots, rollQuality } from '../domain.js';
+import { getRunContract } from '../config/contracts.js';
+import { computeStats, simulateBattle, getCombatSkills, makeGearPiece, generateSkillByMatrix, unlockedGearSlots, rollQuality, describeBossMoves } from '../domain.js';
 import { updatePlayerAttributes, renderBag, hideTooltip } from './render.js';
 import { toast, chooseCard, infoDialog, confirmDialog } from './dialog.js';
 import { saveGame } from '../storage.js';
+import { factionRunModifiers } from '../factions.js';
 import { formatNumber } from '../util.js';
 import { checkAchievementsAndNotify } from './achievement.js';
 
@@ -105,11 +108,14 @@ function effectPreview(eff = {}) {
     if (eff.karma) p.push(`因果${eff.karma > 0 ? '+' : ''}${eff.karma}`);
     if (eff.age) p.push(`寿元${eff.age > 0 ? '+' : ''}${eff.age}`);
     if (eff.material) for (const [k, v] of Object.entries(eff.material)) p.push(`${matName(k)}×${v}`);
+    if (eff.reputation) for (const [f, v] of Object.entries(eff.reputation)) p.push(`${FACTION_NAME_SHORT[f] || f}声望${v > 0 ? '+' : ''}${v}`);
     if (eff.item) p.push('随机神兵');
     if (eff.skill) p.push('随机秘籍');
+    if (eff.runTalent) p.push('本世感悟');
     if (eff.tactic) p.push(`流派转向·${getTactic(eff.tactic).name}`);
     return p.length ? p.join('，') : '（结果未知）';
 }
+const FACTION_NAME_SHORT = { qingcheng: '青城', yaowang: '药王谷', zhujian: '铸剑山庄', blackmarket: '黑市', commoners: '村镇' };
 function requireText(req = {}) {
     if (req.flag) return '需特定际遇';
     if (Number.isFinite(req.karmaMin)) return `需因果≥${req.karmaMin}`;
@@ -190,6 +196,17 @@ export function renderRunPage() {
         ? `<div class="act-card" style="margin-bottom:12px;"><div class="act-meta">🌀 本世感悟（仅此世，轮回清空）：${run.runTalents.map(id => { const t = getRunTalent(id); return t ? `<span title="${t.desc}" style="color:var(--color-blue)">${t.icon}${t.name}</span>` : ''; }).join('　')}</div></div>`
         : '';
 
+    // —— 本世誓约（第五阶段·D；未立誓不显示条）——
+    const cs = contractStatus(player);
+    const contractBar = cs
+        ? `<div class="act-card" style="margin-bottom:12px;border-color:${cs.done ? 'var(--color-success)' : (cs.failed ? 'var(--color-accent)' : 'var(--color-gold)')};">
+            <div class="act-head"><span class="act-title">${cs.tmpl.icon} 本世誓约 · ${cs.tmpl.name}</span>
+                <span style="font-size:12px;color:${cs.done ? 'var(--color-success)' : (cs.failed ? 'var(--color-accent)' : 'var(--text-muted)')};">${cs.done ? '✓ 已达成' : (cs.failed ? '✗ 已破誓' : '进行中')}</span></div>
+            <div class="act-meta" style="margin-top:4px;">${cs.tmpl.desc}</div>
+            <div class="act-meta" style="margin-top:4px;color:#9bbcd8;">进度：${cs.progressText}</div>
+        </div>`
+        : '';
+
     // —— ③ 江湖棋盘（分支节点图：分层 + 当前路径可达）——
     const reachable = new Set(reachableNodeIds(player));
     const branched = run.nodeMap.some(n => Number.isFinite(n.row));
@@ -235,7 +252,7 @@ export function renderRunPage() {
     if (bossCleared && !isLastRegion) controls += `<button class="btn btn-success" data-act="roguelite-advance">⬆️ 深入下一区域</button>`;
     controls += `<button class="btn btn-danger" data-act="roguelite-rebirth">🕯️ 主动轮回（结算本世）</button></div></div>`;
 
-    box.innerHTML = legacyBar + info + talentBar + tacticBar + board + controls;
+    box.innerHTML = legacyBar + info + contractBar + talentBar + tacticBar + board + controls;
     // 分支连线：DOM 落地后测量绘制；并绑定一次 resize 重绘（仅轮回页激活时）
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(drawBoardEdges); else drawBoardEdges();
     if (!edgeResizeBound) {
@@ -274,10 +291,26 @@ function nodeCardHtml(node, reachable) {
     if (node.visited) { btn = `<button class="btn" disabled>✓ 已探索</button>`; dim = 'opacity:0.45;'; }
     else if (!reachable) { btn = `<button class="btn" disabled>🔒 未达</button>`; dim = 'opacity:0.6;'; }
     else btn = `<button class="btn ${node.type === 'boss' ? 'btn-danger' : (node.type === 'rest' ? 'btn-success' : '')}" data-act="roguelite-node" data-node="${node.id}">进入</button>`;
+    // 第五阶段·Boss 招式速览（未探索的 Boss 节点）：已知招式 + 主要威胁 + 可破招方式（玩家当前构筑能否破 → 高亮）。
+    const bossInfo = (node.type === 'boss' && !node.visited) ? bossMovesPreviewHtml(node.regionId) : '';
     return `<div class="act-card" data-nid="${node.id}" style="${dim}padding:8px 10px;margin-bottom:0;">
         <div class="act-head"><span class="act-title" style="font-size:13px;">${info.icon} ${node.name}</span>${btn}</div>
         <div class="act-meta">${info.label} · 难度 <span style="color:var(--color-orange)">${stars}</span>${modTag}${affTag}<br>🎁 ${node.rewardHint}</div>
+        ${bossInfo}
     </div>`;
+}
+
+// Boss 招式速览（棋盘 Boss 卡 + 战前可读）：招式·威胁·可破招方式。玩家当前构筑能破的方式标✓绿、否则标○灰。
+function bossMovesPreviewHtml(regionId) {
+    let info = null;
+    try { info = describeBossMoves(state.player, regionId); } catch (e) { info = null; }
+    if (!info || !info.moves || !info.moves.length) return '';
+    const rows = info.moves.map(m => {
+        const breaks = (m.breaks || []).map(b => `<span style="color:${b.can ? 'var(--color-success)' : 'var(--text-muted)'}">${b.can ? '✓' : '○'}${b.text}</span>`).join('、');
+        return `<div style="margin-top:3px;"><b style="color:var(--color-honghuang)">${m.name}</b> <span style="color:#aaa;">${m.threat}</span><br><span style="font-size:11px;">破招：${breaks || '—'}</span></div>`;
+    }).join('');
+    return `<div style="margin-top:6px;padding-top:5px;border-top:1px dashed #333;font-size:12px;">
+        <span style="color:var(--color-gold);">⚑ 招式·破招（${info.bossName}）</span>${rows}</div>`;
 }
 
 // 棋盘分支连线（SVG 覆盖层）：在 renderRunPage 写入 DOM 后用 rAF 测量节点位置绘制。
@@ -350,6 +383,41 @@ async function openLifepathChoice(nextLife) {
     const lp = getLifepath(chosen);
     toast(`✨ 第 ${player.run.lifeNo} 世开启 · 命格【${lp.name}】！`, 'success');
     if (player.run.lifeNo === 1) await showRegionIntro(player); // 首世入场叙事（轮回后不再重复首区域引子）
+    await offerContract(player);  // 第五阶段·D：开世立誓（可不立）
+}
+
+// 开世·立誓三选一（可「暂不立誓」）。立誓后渲染誓约条。
+async function offerContract(player) {
+    const ids = rollContractChoices(player, 3);
+    if (!ids.length) return;
+    const rarityTag = { common: '寻常', rare: '稀有', epic: '史诗' };
+    const cards = ids.map(id => {
+        const c = getRunContract(id); if (!c) return null;
+        const desc = `<b style="color:var(--color-gold)">目标</b>：${c.objective}<br><b style="color:var(--color-accent)">限制</b>：${c.restriction}<br><b style="color:var(--color-success)">酬</b>：${contractRewardText(c.reward)}`;
+        return { title: `${c.icon} ${c.name}`, desc, value: id, tag: rarityTag[c.rarity] || '' };
+    }).filter(Boolean);
+    const chosen = await chooseCard('📜 本世誓约（三选一，可不立）', '立一誓决定这世的打法目标——达成发一次厚赏，违誓则破。', cards, { cancelLabel: '暂不立誓' });
+    setContract(player, chosen || null);
+    saveGame();
+    renderRunPage();
+    if (chosen) { const c = getRunContract(chosen); toast(`📜 立誓【${c.name}】！`, 'success'); }
+}
+function contractRewardText(reward = {}) {
+    const p = [];
+    if (reward.coin) p.push(`碎银+${formatNumber(reward.coin)}`);
+    if (reward.exp) p.push(`修为+${formatNumber(reward.exp)}`);
+    if (reward.karma) p.push(`因果${reward.karma > 0 ? '+' : ''}${reward.karma}`);
+    if (reward.reputation) for (const [f, v] of Object.entries(reward.reputation)) p.push(`${FACTION_NAME_SHORT[f] || f}声望+${v}`);
+    if (reward.materials) for (const [k, v] of Object.entries(reward.materials)) p.push(`${matName(k)}×${v}`);
+    if (reward.permStats) for (const [k, v] of Object.entries(reward.permStats)) p.push(`永久${({ hp: '气血', atk: '攻击', def: '防御', crit: '暴击', dodge: '闪避' })[k] || k}+${v}`);
+    return p.join('、') || '—';
+}
+// 推进誓约并提示（达成发奖 toast / 破誓 toast）。在战斗/黑市/委托等动作后调用。
+export function noteContractUI(player, kind, amount = 1) {
+    const r = noteContract(player, kind, amount);
+    if (!r) return;
+    if (r.state === 'completed') toast(`📜 誓约【${r.tmpl.name}】达成！${r.logs.join('　')}`, 'success');
+    else if (r.state === 'failed') toast(`⚠ 誓约【${r.tmpl.name}】已破。`, 'error');
 }
 
 // 区域开场叙事（首世入场 / 深入新区域时）。
@@ -454,6 +522,7 @@ export async function enterNode(nodeId) {
         if (player.run.hp <= 0) dead = true;
         if (dead) { await triggerSettlement('death'); return; }
         if (player.run.age >= player.run.maxAge) { toast('⏳ 寿元已尽，此生落幕。', 'info'); await triggerSettlement('age'); return; }
+        noteContractUI(player, 'nodeAdvance');   // 第五阶段·D：节点推进（十步一杀时限核验）
 
         saveGame();
         updatePlayerAttributes();
@@ -469,10 +538,14 @@ async function resolveBattleNode(player, node, maxHp) {
     const enemy = finalizeNodeEnemy(player, node);
     const mods = getModifiers(player);
     const tactic = getTactic(player.run.selectedTactic);
+    // —— 第五阶段·炉心过载：精英/Boss 战前抉择（器修/铸剑山庄解锁）。消耗锭+碎银+本世次数，换本战增伤/减伤+破招 ——
+    const overcharge = await maybeOvercharge(player, node, stats);
     const result = simulateBattle(stats, enemy, getCombatSkills(player), {
-        tactic, startHp: player.run.hp, vsBonusPct: vsBonusPctFor(player, node), poisonMult: 1 + mods.poisonMult
+        tactic, startHp: player.run.hp, vsBonusPct: vsBonusPctFor(player, node), poisonMult: 1 + mods.poisonMult,
+        karma: player.run.karma || 0, overcharge
     });
     player.run.hp = clampHp(result.remainingHp, maxHp);
+    accumulateBuildStats(player, result.buildSummary);   // 构筑机制触发计数（跨世累积）
 
     let outcome, rewardLogs = [];
     if (result.remainingHp <= 0) {
@@ -495,6 +568,13 @@ async function resolveBattleNode(player, node, maxHp) {
         player.totalKills = (player.totalKills || 0) + 1;
         if (node.type === 'boss') player.run.clearedBosses++;
         checkAchievementsAndNotify('battle');
+        // —— 第五阶段·D 誓约推进（达成即发奖 toast）——
+        const bs = result.buildSummary || {};
+        if (node.type === 'boss') noteContractUI(player, 'bossKill');
+        if (bs.poisonBursts > 0) noteContractUI(player, 'poisonBurstKill');                 // 此敌以毒蚀爆发了结
+        if (bs.bossBreaks > 0) noteContractUI(player, 'bossBreak', bs.bossBreaks);
+        if (bs.afterimageHits > 0) noteContractUI(player, 'afterimage', bs.afterimageHits);
+        if (overcharge && (node.type === 'elite' || node.type === 'boss')) noteContractUI(player, 'overchargeKill');
     } else {
         outcome = 'survive';
         if (node.type !== 'boss') { node.visited = true; player.run.visitedNodes.push(node.id); } // Boss 未杀可重战
@@ -503,6 +583,29 @@ async function resolveBattleNode(player, node, maxHp) {
     // 精英/Boss 战胜 → 领悟一门本世感悟（流派构筑）
     if (outcome === 'win' && (node.type === 'elite' || node.type === 'boss')) await grantRunTalentChoice(player);
     return outcome === 'dead';
+}
+
+// 炉心过载·战前抉择：仅精英/Boss、且构筑启用炉心(器修/铸剑山庄)、本世次数未满、材料碎银充足时弹确认。
+// 返回是否过载（true 时已扣 锭+碎银+本世次数）。代价集中在 BUILD_RULES.forge / 派系特权(铸剑可降耗增威)。
+async function maybeOvercharge(player, node, stats) {
+    const fo = (stats.build && stats.build.forge && stats.build.forge.enabled) ? stats.build.forge : null;
+    if (!fo || (node.type !== 'elite' && node.type !== 'boss')) return false;
+    const used = player.run.overchargeUsed || 0;
+    if (used >= fo.perLifeCap) { toast(`本世炉心过载已用尽（${fo.perLifeCap} 次）。`, 'info'); return false; }
+    const wpnTier = (player.equips.weapon && player.equips.weapon.tier) || 1;
+    const ingotKey = (GEAR_TIERS[wpnTier - 1] && GEAR_TIERS[wpnTier - 1].ingot) || 'ingot_copper';
+    const ingotName = MATERIALS[ingotKey] ? MATERIALS[ingotKey].name : ingotKey;
+    const haveIngot = (player.materials && player.materials[ingotKey]) || 0;
+    if (haveIngot < fo.costIngot || (player.coin || 0) < fo.costCoin) return false; // 付不起则不弹（不打扰）
+    const ok = await confirmDialog(
+        `🔥 炉心过载？消耗 <b>${ingotName}×${fo.costIngot}</b> + 碎银 <b>${formatNumber(fo.costCoin)}</b>（本世余 ${fo.perLifeCap - used} 次）。<br>本战增伤 <b style="color:var(--color-orange)">+${fo.dmgBonusPct}%</b>、减伤 <b style="color:var(--color-blue)">+${fo.dmgReductionPct}%</b>，并可硬破部分 Boss 招式。`,
+        '炉心过载');
+    if (!ok) return false;
+    player.materials[ingotKey] -= fo.costIngot;
+    if (player.materials[ingotKey] <= 0) delete player.materials[ingotKey];
+    player.coin = Math.max(0, (player.coin || 0) - fo.costCoin);
+    player.run.overchargeUsed = used + 1;
+    return true;
 }
 
 // 本世感悟三选一（精英/Boss 战胜、部分奇遇触发）。可「暂不领悟」。
@@ -526,7 +629,16 @@ function battleLogHtml(events) {
         if (ev.side === 'tactic') return `<div style="color:var(--color-orange)">第${ev.round}回 · ${ev.text}</div>`;
         if (ev.side === 'ethorns') return `<div style="color:var(--color-accent)">第${ev.round}回 · 敌·荆棘反伤 -${formatNumber(ev.dmg)}</div>`;
         if (ev.side === 'regen') return `<div style="color:var(--color-success)">第${ev.round}回 · 回血+${formatNumber(ev.heal)}</div>`;
-        if (ev.side === 'eregen') return `<div style="color:var(--color-honghuang)">第${ev.round}回 · 敌·再生+${formatNumber(ev.heal)}</div>`;
+        if (ev.side === 'eregen') return `<div style="color:var(--color-honghuang)">第${ev.round}回 · 敌·回元+${formatNumber(ev.heal)}</div>`;
+        // —— 第五阶段·构筑机制 / Boss 招式 ——
+        if (ev.side === 'sword') return `<div style="color:var(--color-orange)">第${ev.round}回 · ⚔️ 剑势·破绽斩 -${formatNumber(ev.dmg)}（破防）</div>`;
+        if (ev.side === 'poisonburst') return `<div style="color:var(--color-success)">第${ev.round}回 · ☠️ 毒蚀爆发 -${formatNumber(ev.dmg)}（${ev.stacks || ''}层齐爆）</div>`;
+        if (ev.side === 'guard') return `<div style="color:var(--color-blue)">第${ev.round}回 · 🛡️ 守势硬接（减伤 ${formatNumber(ev.absorbed || 0)}${ev.counter > 0 ? ` · 反震 -${formatNumber(ev.counter)}` : ''}）</div>`;
+        if (ev.side === 'afterimage') return `<div style="color:var(--color-blue)">第${ev.round}回 · 🪶 影步补刀 -${formatNumber(ev.dmg)}</div>`;
+        if (ev.side === 'overcharge') return `<div style="color:var(--color-honghuang)">第${ev.round}回 · 🔥 ${ev.text || '炉心过载'}</div>`;
+        if (ev.side === 'bossmove') return ev.broken
+            ? `<div style="color:var(--color-success)">第${ev.round}回 · ✨ 破招！【${ev.name}】被「${ev.by}」化解</div>`
+            : `<div style="color:var(--color-honghuang)">第${ev.round}回 · ⚠ Boss【${ev.name}】发动：${ev.telegraph || ''}</div>`;
         return `<div style="color:var(--color-blue)">第${ev.round}回 · ${ev.text || '闪避'}</div>`;
     });
     return lines.join('');
@@ -548,8 +660,27 @@ async function battleResultModal(node, enemy, tactic, result, outcome, rewardLog
     const html2 = `
         <div style="text-align:left;background:#0a0a0a;border:1px solid #222;border-radius:5px;padding:8px 10px;font-size:12px;line-height:1.7;max-height:200px;overflow-y:auto;font-family:'Consolas',monospace;">${battleLogHtml(result.events)}</div>
         <div style="margin-top:8px;color:${result.remainingHp > 0 ? 'var(--color-success)' : 'var(--color-accent)'};">剩余气血：${formatNumber(Math.max(0, result.remainingHp))} / ${formatNumber(maxHp)}</div>
+        ${buildSummaryLine(result.buildSummary)}
         ${spoils}`;
     await infoDialog(html + html2, titleMap[outcome] || '战斗', outcome === 'dead' ? '魂归轮回' : '收功');
+}
+
+// 把战斗的构筑机制触发（buildSummary）汇成一行中文（结算面板展示），并累加进 player.buildStats（跨世统计）。
+function buildSummaryLine(bs) {
+    if (!bs) return '';
+    const parts = [];
+    if (bs.swordBreaks) parts.push(`⚔️剑势破绽×${bs.swordBreaks}`);
+    if (bs.poisonBursts) parts.push(`☠️毒蚀爆发×${bs.poisonBursts}`);
+    if (bs.guardCounters) parts.push(`🛡️守势硬接×${bs.guardCounters}`);
+    if (bs.afterimageHits) parts.push(`🪶影步补刀×${bs.afterimageHits}`);
+    if (bs.overcharges) parts.push(`🔥炉心过载`);
+    if (bs.bossBreaks) parts.push(`✨破招×${bs.bossBreaks}`);
+    return parts.length ? `<div style="color:var(--color-blue);font-size:12px;margin-top:6px;">构筑机制：${parts.join('　')}</div>` : '';
+}
+function accumulateBuildStats(player, bs) {
+    if (!bs) return;
+    if (!player.buildStats || typeof player.buildStats !== 'object') player.buildStats = { swordBreaks: 0, poisonBursts: 0, guardCounters: 0, afterimageHits: 0, overcharges: 0, bossBreaks: 0 };
+    for (const k of Object.keys(player.buildStats)) player.buildStats[k] += (bs[k] || 0);
 }
 
 async function resolveEventNode(player, node, maxHp) {
@@ -659,6 +790,7 @@ async function resolveShopNode(player, node) {
     if (g.kind === 'item') player.bag.push(g.obj);
     else player.bag.push({ id: 'bk_' + Date.now() + Math.random(), name: `秘籍·《${g.obj.name}》`, type: 'book', payload: g.obj, price: Math.floor(g.obj.price / 5) });
     toast(`购得【${g.obj.name}】。`, 'success');
+    noteContractUI(player, 'blackmarketTrade');   // 第五阶段·D：黑市交易（黑契入命+ / 清修不染破誓）
 }
 
 // 生死结算 → 轮回遗产三选一 → 开启下一世。
@@ -667,6 +799,7 @@ async function triggerSettlement(reason) {
     const ascend = reason === 'ascend';
     const lost = reason === 'death' ? applyDeathPenalty(player) : 0;
     const s = settleLife(player);
+    const csEnd = contractStatus(player);   // 第五阶段·D：结算时回显本世誓约结果
     updateRecords(player, s);
     // 本世就此落幕：先把 run 标记为非活跃并落盘。这样即便玩家在随后『轮回遗产 / 下一世命格』
     // 两个强制弹窗中途关闭页面（其间可能被 5 秒自动存档/pagehide 落盘），重载也会落回
@@ -697,7 +830,8 @@ async function triggerSettlement(reason) {
     const earned = ascend || (s.nodesDone >= minNodes || s.clearedBosses >= 1);
     // 按本世评价缩放：飞升 → 抽 3 缕、池 4；S → 2 缕、池 4；A → 1 缕、池 4；B/C → 1 缕、池 3。
     const draws = !earned ? 0 : (ascend ? 3 : (s.grade === 'S' ? 2 : 1));
-    const poolSize = (ascend || s.grade === 'S' || s.grade === 'A') ? 4 : 3;
+    // 无名村镇·香火绵延：遗产候选池 +legacyPoolBonus（更易择得心仪遗产）。
+    const poolSize = ((ascend || s.grade === 'S' || s.grade === 'A') ? 4 : 3) + (factionRunModifiers(player).legacyPoolBonus || 0);
 
     const summary = `
         <div style="color:#ccc;line-height:1.9;text-align:left;display:inline-block;">
@@ -707,6 +841,7 @@ async function triggerSettlement(reason) {
             <div>本世进账：碎银 <b style="color:var(--color-gold)">${formatNumber(s.coinGained)}</b> · 修为 <b style="color:var(--color-success)">${formatNumber(s.expGained)}</b></div>
             <div>因果 <b>${s.karma}</b>（${s.karmaDesc}）</div>
             ${lost ? `<div style="color:var(--color-accent)">陨落遗失碎银 ${formatNumber(lost)} 文</div>` : ''}
+            ${csEnd ? `<div>本世誓约【${csEnd.tmpl.name}】：<b style="color:${csEnd.done ? 'var(--color-success)' : (csEnd.failed ? 'var(--color-accent)' : 'var(--text-muted)')}">${csEnd.done ? '已达成 ✓' : (csEnd.failed ? '已破誓 ✗' : '未竟')}</b></div>` : ''}
             <div style="margin-top:8px;">本世评价：<b style="color:${s.gradeColor};font-size:20px;">${s.grade}</b> — ${s.gradeDesc}</div>
         </div>`;
 

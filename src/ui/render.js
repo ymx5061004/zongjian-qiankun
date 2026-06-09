@@ -5,11 +5,13 @@
 // ============================================================
 import { QUALITY_NAMES, QUALITY_COLORS, MAP_NAMES, BALANCE, SKILL_SUFFIXES, REALMS, PROFESSIONS, MATERIALS, ACTIVITIES, GEAR_TIERS, BOSSES, COMBAT_AFFIXES, GEAR_SLOTS, GUIDE_QUESTS, CULTIVATION_PATHS, CRAFT_AFFIXES } from '../config.js';
 import { state } from '../state.js';
-import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getGameplayAdvice, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById, getMapModifierBrief, getBossPlan, getPathRecommendations, getStageAssessment, getNextUnlock, materialSourceHint, shopRefreshCost, decayedRefreshSteps, getCombatSkills, skillSlotKind, ensureLoadout, analyzeChallenge } from '../domain.js';
+import { computeStats, getRealmName, generateSkillByMatrix, levelFromExp, expForLevel, enhanceCost, makeGearPiece, gearCraftCost, rollQuality, mapTier, gearUpgradeCost, MAX_CRAFTABLE_TIER, effDurationMs, bonusYieldChance, idleSpeedFactor, bagExpandCost, unlockedGearSlots, syncQuestProgress, getQuestProgress, getCurrentGuideQuest, getGameplayAdvice, getActivePath, isPathUnlocked, pathSwitchCost, getMapModifier, getPathById, pathProductionAdvice, getCraftAffixById, getMapModifierBrief, getBossPlan, getPathRecommendations, getStageAssessment, getNextUnlock, materialSourceHint, shopRefreshCost, decayedRefreshSteps, getCombatSkills, skillSlotKind, ensureLoadout, analyzeChallenge, analyzeBuild } from '../domain.js';
 import { getModifiers } from '../run.js';
 import { HEART_ARTS, FORBIDDEN_ARTS, getHeartArt, getForbiddenArt } from '../config/manuals.js';
 import { FACTION_LIST, getFaction } from '../config/orders.js';
+import { RISK_FACTIONS } from '../config/factions.js';
 import { ensureOrders, canSubmitOrder, orderRefreshSteps, orderRefreshCost, reputationLabel, missingText } from '../orders.js';
+import { factionPerkProgress } from '../factions.js';
 import { formatNumber } from '../util.js';
 import { renderAchievementPanel } from './achievement.js';
 
@@ -653,6 +655,32 @@ export function renderLoadout() {
         <div class="act-meta" style="margin-top:4px;color:var(--text-muted);">主动/被动在下方「百门绝学宝库」每张秘籍卡上【装配】；心法/禁忌在此选择 ⬇</div>
     </div>`;
 
+    // —— 第五阶段·F 构筑摘要（据 stats.build 现算：主构筑/机制/强项/弱点/可破 Boss 招/补件）——
+    let ab = null; try { ab = analyzeBuild(player); } catch (e) { ab = null; }
+    const fmtList = arr => (arr && arr.length) ? arr.join('、') : '—';
+    const buildCard = ab ? `<div class="act-card" style="margin-bottom:10px;">
+        <div class="act-head"><span class="act-title">🧬 构筑摘要</span><span style="font-size:12px;color:var(--color-gold);">${ab.primaryIcon} ${ab.primaryName}</span></div>
+        <div class="act-meta" style="margin-top:6px;line-height:1.95;">
+            已启用机制：${ab.enabledMechanics.length ? ab.enabledMechanics.join(' ') : '<span style="color:var(--text-muted)">无（未激活构筑机制）</span>'}<br>
+            <span style="color:var(--color-success)">强项</span>：${fmtList(ab.strengths)}<br>
+            <span style="color:var(--color-accent)">怕什么</span>：${fmtList(ab.weaknesses)}<br>
+            <span style="color:var(--color-blue)">可破 Boss 招</span>：${fmtList(ab.bossCounters)}
+            ${ab.missingPieces.length ? `<br><span style="color:var(--color-gold)">推荐补件</span>：<br>${ab.missingPieces.map(m => `· ${m}`).join('<br>')}` : ''}
+        </div></div>` : '';
+
+    // —— 第五阶段·F 装配预设（最多 3 个：保存当前 / 应用 / 删除；应用时自动清 dangling id）——
+    const presets = Array.isArray(player.loadoutPresets) ? player.loadoutPresets : [];
+    const presetRows = presets.length ? presets.map((pr, i) => {
+        const lo2 = pr.loadout || {};
+        const cnt = (lo2.active ? 1 : 0) + (Array.isArray(lo2.passives) ? lo2.passives.length : 0) + (lo2.heart ? 1 : 0) + (lo2.forbidden ? 1 : 0);
+        return `<div class="prop-row" style="align-items:center;"><span style="flex:1;color:#ddd;">📁 ${pr.name} <small style="color:var(--text-muted);">（${cnt} 项）</small></span>
+            <button class="btn btn-success" style="padding:2px 10px;font-size:11px;" data-act="apply-preset" data-idx="${i}">应用</button>
+            <button class="btn" style="padding:2px 8px;font-size:11px;margin-left:4px;" data-act="delete-preset" data-idx="${i}">删</button></div>`;
+    }).join('') : '<span style="color:var(--text-muted);font-size:12px;">暂无预设——配好一套装配后可保存，随时一键切换。</span>';
+    const presetCard = `<div class="act-card" style="margin-bottom:10px;">
+        <div class="act-head"><span class="act-title">📁 装配预设</span><button class="btn" style="padding:2px 10px;" data-act="save-preset" ${presets.length >= 3 ? 'disabled' : ''}>＋ 保存当前（${presets.length}/3）</button></div>
+        <div style="margin-top:6px;">${presetRows}</div></div>`;
+
     // 心法 / 禁忌 候选
     const candList = (title, color, arts, kind, curId) => {
         const rows = arts.map(a => {
@@ -668,7 +696,7 @@ export function renderLoadout() {
         return `<div class="act-card" style="margin-bottom:10px;"><div class="act-head"><span class="act-title" style="color:${color}">${title}</span></div><div style="margin-top:6px;">${rows}</div></div>`;
     };
 
-    box.innerHTML = summary
+    box.innerHTML = summary + buildCard + presetCard
         + candList('☯️ 心法 · 择一改变成长方向', 'var(--color-blue)', HEART_ARTS, 'heart', lo.heart)
         + candList('☠️ 禁忌秘籍 · 强收益但有代价（可不带）', 'var(--color-honghuang)', FORBIDDEN_ARTS, 'forbidden', lo.forbidden);
 }
@@ -743,7 +771,7 @@ export function renderProduction() {
 }
 
 // 渲染物料仓库（采矿/锻造两页各有一个容器，内容相同：列出所有持有量>0 的物料）。
-// 物料用途提示（第五阶段）：让玩家明白每种料能干什么，并体会「同一批料只能挪作一处」的选择成本。
+// 物料用途提示：让玩家明白每种料能干什么，并体会「同一批料只能挪作一处」的选择成本。
 function matUsage(k) {
     if (k.startsWith('ore_')) return '熔炼→锭';
     if (k.startsWith('ingot_')) return '强化 / 打造';
@@ -848,7 +876,7 @@ export function renderEnhance() {
 
 // ---------- 打造图谱页（按档×部位确定性打造命名套装；档由采矿/锻造等级解锁）----------
 let selectedCraftTier = 0;          // 0=未选(首次打开自动落到已解锁最高档)
-let selectedCraftAffix = 'none';    // 第五阶段：当前选中的打造副词条（模块级，不入存档）
+let selectedCraftAffix = 'none';    // 当前选中的打造副词条（模块级，不入存档）
 export function selectCraftTier(tier) { selectedCraftTier = tier; renderCraft(); }
 export function selectCraftAffix(id) { selectedCraftAffix = id; renderCraft(); }
 
@@ -878,7 +906,7 @@ export function renderCraft() {
     const matName = MATERIALS[cost.ingotKey] ? MATERIALS[cost.ingotKey].name : cost.ingotKey;
     const slots = unlockedGearSlots(player.realmLevel);
 
-    // —— 第五阶段：流派建议 + 副词条选择器（★ 标记契合当前流派的词条）——
+    // —— 打造：流派建议 + 副词条选择器（★ 标记契合当前流派的词条）——
     const path = getActivePath(player);
     if (selectedCraftAffix !== 'none' && !getCraftAffixById(selectedCraftAffix)) selectedCraftAffix = 'none';
     const curAffix = getCraftAffixById(selectedCraftAffix) || getCraftAffixById('none');
@@ -1185,7 +1213,7 @@ export function renderOrdersPage() {
     ensureOrders(player);
     const now = Date.now();
     const steps = orderRefreshSteps(player.orders, now);
-    const cost = orderRefreshCost(steps);
+    const cost = orderRefreshCost(steps, player);
     const rep = player.reputation || {};
 
     // —— 派系声望条 ——
@@ -1198,6 +1226,28 @@ export function renderOrdersPage() {
             <button class="btn" data-act="refresh-orders">🔄 刷新委托（${formatNumber(cost)}文）</button></div>
         <div style="margin-top:8px;">${repChips}</div>
         <div class="act-meta" style="margin-top:6px;color:var(--text-muted);">声望越高，该派委托的碎银/物料奖励越丰、并浮现稀有/史诗委托。累计达成 ${player.orders.completedCount || 0} 次。</div>
+    </div>`;
+
+    // —— 第五阶段·派系声望特权（按 player.reputation 自动解锁；黑市特权带因果风险提示）——
+    const prog = factionPerkProgress(player);
+    const perkCards = FACTION_LIST.map(f => {
+        const v = rep[f.id] || 0;
+        const pg = prog[f.id] || { unlocked: [], next: null };
+        const risk = RISK_FACTIONS.includes(f.id);
+        const unlockedHtml = pg.unlocked.length
+            ? pg.unlocked.map(p => `<div style="font-size:12px;color:var(--color-success);">✓ <b>${p.name}</b>（声望 ${p.level}）<span style="color:#9bbcd8;">${p.desc}</span></div>`).join('')
+            : `<div style="font-size:12px;color:var(--text-muted);">尚未解锁特权（声望达 ${pg.next ? pg.next.level : '—'} 解锁首档）</div>`;
+        const nextHtml = pg.next
+            ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">下一档：<b style="color:${f.tone}">${pg.next.name}</b>（需声望 ${pg.next.level}，还差 ${Math.max(0, pg.next.level - v)}）— ${pg.next.desc}</div>`
+            : `<div style="font-size:12px;color:var(--color-gold);margin-top:2px;">★ 该派特权已全部解锁</div>`;
+        const riskTag = risk ? `<span title="黑市特权伴随因果业力，交易/禁忌招因果" style="color:var(--color-accent);font-size:11px;">⚠ 因果风险</span>` : '';
+        return `<div class="prop-row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+            <div style="display:flex;justify-content:space-between;width:100%;"><span style="color:${f.tone};font-weight:bold;">${f.icon} ${f.name} <small style="color:var(--text-muted);">声望 ${v}</small></span>${riskTag}</div>
+            ${unlockedHtml}${nextHtml}</div>`;
+    }).join('');
+    const perksPanel = `<div class="act-card" style="margin-bottom:12px;">
+        <div class="act-head"><span class="act-title">🎖️ 派系特权</span><span style="font-size:11px;color:var(--text-muted);">声望达标自动解锁，影响战斗/委托/事件</span></div>
+        <div style="margin-top:6px;">${perkCards}</div>
     </div>`;
 
     // —— 委托卡 ——
@@ -1232,7 +1282,7 @@ export function renderOrdersPage() {
         </div>`;
     }).join('');
 
-    box.innerHTML = head + (cards || `<div class="act-card" style="text-align:center;color:var(--text-muted);">暂无委托，点【刷新委托】招募。</div>`);
+    box.innerHTML = head + perksPanel + (cards || `<div class="act-card" style="text-align:center;color:var(--text-muted);">暂无委托，点【刷新委托】招募。</div>`);
 }
 
 // ---------- 天机推演（第四阶段）：胜算 + 失败主因 + 模拟对比建议（on-demand，进冒险页或点【重新推演】时算）----------
@@ -1247,6 +1297,16 @@ export function renderTianji() {
         return;
     }
     const [dl, dc] = DANGER_TIANJI[a.danger] || DANGER_TIANJI.unknown;
+    // 第五阶段·F 天机三策（稳/险/绕，各带代价 + 估算胜算）
+    const PLAN_TONE = { safe: ['稳策', 'var(--color-success)'], risky: ['险策', 'var(--color-orange)'], detour: ['绕策', 'var(--color-blue)'] };
+    const plansHtml = (a.plans || []).map(p => {
+        const [nm, tone] = PLAN_TONE[p.id] || [p.name, 'var(--color-gold)'];
+        const gain = (p.estimatedGain != null && p.estimatedGain >= 1) ? ` <b style="color:var(--color-success);">胜算+${p.estimatedGain}%</b>` : '';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-top:1px solid rgba(255,255,255,0.06);">
+            <span style="flex:1;font-size:13px;color:#ddd;line-height:1.5;"><b style="color:${tone};">${nm}</b>：${p.desc}${gain} <small style="color:var(--text-muted);">[代价：${p.cost}]</small></span>
+            ${p.page ? `<button class="btn" style="padding:3px 12px;flex:none;" data-act="switch-page" data-page="${p.page}">前往</button>` : ''}
+        </div>`;
+    }).join('');
     const sugg = (a.suggestions || []).map(s =>
         `<div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-top:1px solid rgba(255,255,255,0.06);">
             <span style="flex:1;font-size:13px;color:#ddd;line-height:1.5;">· ${s.text}${s.gain != null ? ` <b style="color:var(--color-success);">（胜算 +${s.gain}%）</b>` : ''}</span>
@@ -1260,6 +1320,7 @@ export function renderTianji() {
             <span>预计平均 <b style="color:var(--color-gold);">${a.avgRounds.toFixed(1)}</b> 回合</span>
         </div>
         <div class="act-meta" style="color:#e0b0b0;margin-top:4px;">${a.causeText}</div>
+        <div style="margin-top:6px;"><div style="font-size:12px;color:var(--color-gold);font-weight:bold;">⚖️ 天机三策（稳 / 险 / 绕，各有代价）</div>${plansHtml}</div>
         <div style="margin-top:6px;"><div style="font-size:12px;color:var(--color-gold);font-weight:bold;">🧭 破局之策（模拟推演 · 估算收益）</div>${sugg}</div>
     </div>`;
 }

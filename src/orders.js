@@ -7,6 +7,7 @@
 import { MATERIALS, BALANCE } from './config.js';
 import { ORDER_TEMPLATES, getFaction } from './config/orders.js';
 import { levelFromExp, mapTier } from './domain.js';
+import { factionRunModifiers } from './factions.js';
 
 function matName(k) { return MATERIALS[k] ? MATERIALS[k].name : k; }
 
@@ -40,11 +41,12 @@ export function generateOrders(player, n = BALANCE.orders.slots) {
     const realm = player.realmLevel || 1;
     const rep = player.reputation || {};
     const O = BALANCE.orders;
+    const cut = factionRunModifiers(player).rareRepReqCut || 0; // 黑市·销金窟：稀有/史诗委托声望门槛下调
     const eligible = ORDER_TEMPLATES.filter(t => {
         if (t.tier > tierCap) return false;
         if ((t.minRealm || 1) > realm) return false;
-        if (t.rarity === 'rare' && (rep[t.faction] || 0) < O.rareRepReq) return false;
-        if (t.rarity === 'epic' && (rep[t.faction] || 0) < O.epicRepReq) return false;
+        if (t.rarity === 'rare' && (rep[t.faction] || 0) < Math.max(0, O.rareRepReq - cut)) return false;
+        if (t.rarity === 'epic' && (rep[t.faction] || 0) < Math.max(0, O.epicRepReq - cut)) return false;
         return true;
     });
     // 兜底：可选池不足 → 放宽到「≤档的 common」→ 仍空则最低档 common，保证总能凑出委托。
@@ -146,9 +148,12 @@ export function orderRefreshSteps(orders, now) {
     if (orders.lastRefreshAt) { const d = Math.floor((now - orders.lastRefreshAt) / BALANCE.orders.refreshDecayMs); if (d > 0) c = Math.max(0, c - d); }
     return c;
 }
-export function orderRefreshCost(steps) {
+export function orderRefreshCost(steps, player) {
     const O = BALANCE.orders;
-    return Math.max(O.refreshBase, Math.round(O.refreshBase * Math.pow(O.refreshGrowth, Math.max(0, steps)) / 100) * 100);
+    const mult = player ? (1 + (factionRunModifiers(player).orderRefreshMult || 0)) : 1; // 黑市·牙行门路：刷新降价
+    const base = Math.max(1, Math.round(O.refreshBase * mult));
+    const raw = O.refreshBase * mult * Math.pow(O.refreshGrowth, Math.max(0, steps));
+    return Math.max(base, Math.round(raw / 100) * 100);
 }
 
 // 委托态兜底 + 惰性生成（active 为空时填满）。供 render/actions 进页前调用，幂等。

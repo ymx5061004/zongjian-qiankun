@@ -15,6 +15,7 @@ import {
     renderQuestPanel, fmtQuestReward, renderPathPage, renderLoadout, renderOrdersPage
 } from './ui/render.js';
 import { saveGame, exportSaveString, importSaveString } from './storage.js';
+import { noteContractUI } from './ui/run.js';   // 第五阶段·D：委托交付推进誓约（actions→ui/run 单向，无环）
 import { toast, confirmDialog, chooseAction } from './ui/dialog.js';
 import { formatNumber } from './util.js';
 import { checkAchievementsAndNotify } from './ui/achievement.js';
@@ -643,6 +644,43 @@ function afterLoadoutChange() {
     saveGame();
 }
 
+// ============================================================
+// 第五阶段·F 装配预设（最多 3 个）：保存当前装配快照 / 一键应用（清 dangling id）/ 删除。
+// ============================================================
+const LOADOUT_PRESET_MAX = 3;
+function snapshotLoadout(lo) {
+    return { active: lo.active || null, passives: Array.isArray(lo.passives) ? lo.passives.slice() : [], heart: lo.heart || null, forbidden: lo.forbidden || null };
+}
+export function saveLoadoutPreset() {
+    const player = state.player;
+    ensureLoadout(player);
+    if (!Array.isArray(player.loadoutPresets)) player.loadoutPresets = [];
+    if (player.loadoutPresets.length >= LOADOUT_PRESET_MAX) { toast(`装配预设已满（最多 ${LOADOUT_PRESET_MAX} 个），请先删除一个。`, 'error'); return; }
+    const name = `预设 ${player.loadoutPresets.length + 1}`;
+    player.loadoutPresets.push({ name, createdAt: Date.now(), loadout: snapshotLoadout(player.loadout) });
+    renderLoadout();
+    saveGame();
+    toast(`已保存当前装配为【${name}】。`, 'success');
+}
+export function applyLoadoutPreset(idx) {
+    const player = state.player;
+    const pr = Array.isArray(player.loadoutPresets) ? player.loadoutPresets[idx] : null;
+    if (!pr || !pr.loadout) { toast('该预设不存在。', 'error'); return; }
+    player.loadout = snapshotLoadout(pr.loadout);
+    ensureLoadout(player);   // 自动清理预设中已不存在的秘籍 id（dangling），不白屏
+    afterLoadoutChange();
+    toast(`已应用装配预设【${pr.name}】。`, 'success');
+}
+export function deleteLoadoutPreset(idx) {
+    const player = state.player;
+    if (!Array.isArray(player.loadoutPresets) || !player.loadoutPresets[idx]) return;
+    const nm = player.loadoutPresets[idx].name;
+    player.loadoutPresets.splice(idx, 1);
+    renderLoadout();
+    saveGame();
+    toast(`已删除装配预设【${nm}】。`, 'info');
+}
+
 export function equipLoadout(kind, id) {
     const player = state.player;
     ensureLoadout(player);
@@ -837,6 +875,9 @@ export function submitOrder(uid) {
     const chk = canSubmitOrder(player, order);
     if (!chk.ok) { toast(`无法交付：尚缺 ${missingText(chk.missing)}。`, 'error'); return; }
     const logs = resolveOrderRewards(player, order);         // 扣料 + 发奖 + 变声望/因果
+    // 第五阶段·D 誓约：委托交付推进（救厄济民=药王谷/村镇 / 黑契入命=黑市；清修不染遇黑市即破誓）
+    if (order.faction === 'yaowang' || order.faction === 'commoners') noteContractUI(player, 'townDeed');
+    if (order.faction === 'blackmarket') noteContractUI(player, 'blackmarketTrade');
     player.orders.completedCount = (player.orders.completedCount || 0) + 1;
     refillOrder(player, uid);                                // 移除已交 + 补一个新委托
     renderOrdersPage();
@@ -852,7 +893,7 @@ export function refreshOrders() {
     ensureOrders(player);
     const now = Date.now();
     const steps = orderRefreshSteps(player.orders, now);
-    const cost = orderRefreshCost(steps);
+    const cost = orderRefreshCost(steps, player);
     if ((player.coin || 0) < cost) { toast(`刷新委托需 ${formatNumber(cost)} 文碎银，碎银不足（连刷涨价，稍候会回落）。`, 'error'); return; }
     player.coin -= cost;
     player.orders.refreshCount = Math.min(BALANCE.orders.refreshMaxStep, steps + 1);

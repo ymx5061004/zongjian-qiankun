@@ -14,6 +14,9 @@ import { LIFEPATHS, LIFEPATH_MAP } from './config/lifepaths.js';
 import { LEGACIES, LEGACY_MAP } from './config/legacy.js';
 import { RUN_TALENTS, RUN_TALENT_MAP, TALENT_SYNERGY } from './config/runtalents.js';
 import { ENEMY_AFFIX_MAP, ENEMY_AFFIX_POOL } from './config/enemyaffixes.js';
+import { getBossMoveSet } from './config/bossMoves.js';
+import { RUN_CONTRACTS, getRunContract } from './config/contracts.js';
+import { factionRunModifiers } from './factions.js';
 
 // 节点类型展示信息（label/icon/描述模板，纯展示）。
 export const NODE_TYPE_INFO = {
@@ -276,7 +279,10 @@ export function startLife(player, lifepathId, { nextLife = false } = {}) {
         lifepathId,
         runTalents: [],
         worldFlags: {},
-        tempBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }
+        tempBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 },
+        // 第五阶段：炉心过载本世次数清零；本世誓约预留（默认 id=null＝无誓约）
+        overchargeUsed: 0,
+        contract: { id: null, progress: {}, failed: false, completed: false, claimed: false }
     };
     player.run = run;
     // 第四阶段·新一世：江湖委托刷新罚则重置（反无限刷新跨世累积；委托内容与声望本身跨世保留）
@@ -372,6 +378,14 @@ export function finalizeNodeEnemy(player, node) {
         const BM = R.bossMech;
         enemy.enrageAt = BM.enrageAt; enemy.enrageMult = BM.enrageMult;
         enemy.chargeEvery = BM.chargeEvery; enemy.chargeMult = BM.chargeMult;
+        // 第五阶段·Boss 招式牌（按区域取）：挂到 enemy.moves，simulateBattle 结算破招。
+        // 有招式牌时，通用周期蓄力(chargeEvery)交由招式接管(避免双重大招)；残血狂暴(enrageAt)保留。
+        const moveSet = getBossMoveSet(node.regionId);
+        if (moveSet && Array.isArray(moveSet.moves) && moveSet.moves.length) {
+            enemy.moves = moveSet.moves;
+            enemy.bossName = moveSet.bossName || enemy.name;
+            enemy.chargeEvery = 0; enemy.chargeMult = 1;
+        }
     }
     // 敌人词条：节点预设(精英1/Boss1) + Boss 因果反噬「天罚」（高因果触发）
     const affixIds = (node.enemyAffixes || []).slice();
@@ -460,6 +474,8 @@ export function choiceAvailable(player, choice) {
 export function applyEventChoice(player, event, choice, maxHp) {
     const run = player.run;
     const mods = getModifiers(player);
+    const fr = factionRunModifiers(player); // 派系特权：无名村镇·广结善缘(奇遇收益) / 药王谷·积善之家(降正向因果)
+    const eventRewardMult = mods.eventRewardMult + (fr.eventRewardBonus || 0);
     const eff = choice.effects || {};
     const logs = [];
     if (!player.pillBonus) player.pillBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 };
@@ -505,26 +521,35 @@ export function applyEventChoice(player, event, choice, maxHp) {
     }
     // 碎银 / 修为 / 洪荒（碎银/修为部分吃 coinMult/expMult? 事件碎银统一吃 eventRewardMult，更直观）
     if (eff.coin) {
-        const v = eff.coin > 0 ? Math.floor(eff.coin * (1 + mods.eventRewardMult)) : eff.coin;
+        const v = eff.coin > 0 ? Math.floor(eff.coin * (1 + eventRewardMult)) : eff.coin;
         player.coin = Math.max(0, player.coin + v);
         if (v > 0) { player.totalCoinEarned = (player.totalCoinEarned || 0) + v; run.coinGained += v; }
         logs.push(`碎银 ${v > 0 ? '+' : ''}${v}`);
     }
     if (eff.exp) { player.exp += eff.exp; if (eff.exp > 0) run.expGained += eff.exp; logs.push(`修为 +${eff.exp}`); }
     if (eff.honghuangPower) { player.honghuangPower = (player.honghuangPower || 0) + eff.honghuangPower; logs.push(`洪荒之力 +${eff.honghuangPower}`); }
-    // 因果（正向因果受 karmaGainMult 放大）
+    // 因果（正向因果受 karmaGainMult 放大；药王谷·积善之家 eventKarmaReduce 减免）
     if (eff.karma) {
-        const k = eff.karma > 0 ? Math.round(eff.karma * (1 + mods.karmaGainMult)) : eff.karma;
-        run.karma = (run.karma || 0) + k;
-        logs.push(`因果 ${k > 0 ? '+' : ''}${k}`);
+        let k = eff.karma > 0 ? Math.round(eff.karma * (1 + mods.karmaGainMult)) : eff.karma;
+        if (k > 0 && fr.eventKarmaReduce) k = Math.max(0, k - fr.eventKarmaReduce);
+        if (k !== 0) { run.karma = (run.karma || 0) + k; logs.push(`因果 ${k > 0 ? '+' : ''}${k}`); }
     }
     // 寿元
     if (eff.age) { run.age = Math.max(0, run.age + eff.age); logs.push(`寿元 ${eff.age > 0 ? '+' : ''}${eff.age}`); }
+    // 派系声望（第五阶段·事件链 payoff；内联增减以避免 import orders 成环）
+    if (eff.reputation) {
+        if (!player.reputation || typeof player.reputation !== 'object') player.reputation = {};
+        const cap = BALANCE.orders.repMax;
+        for (const [f, amt] of Object.entries(eff.reputation)) {
+            player.reputation[f] = Math.max(0, Math.min(cap, (player.reputation[f] || 0) + amt));
+            logs.push(`${FACTION_SHORT[f] || f}声望 ${amt > 0 ? '+' : ''}${amt}`);
+        }
+    }
     // 物料（吃 eventRewardMult）
     if (eff.material) {
         if (!player.materials || typeof player.materials !== 'object') player.materials = {};
         for (const [key, qty] of Object.entries(eff.material)) {
-            const q = Math.max(1, Math.floor(qty * (1 + mods.eventRewardMult)));
+            const q = Math.max(1, Math.floor(qty * (1 + eventRewardMult)));
             player.materials[key] = (player.materials[key] || 0) + q;
             logs.push(`${matLabel(key)}×${q}`);
         }
@@ -608,7 +633,8 @@ export function planNodeReward(player, node, maxHp) {
             break;
         }
         case 'rest': {
-            plan.heal = Math.floor((maxHp || 0) * R.restHealPct);
+            // 药王谷·悬壶济世：调息回血额外加成
+            plan.heal = Math.floor((maxHp || 0) * R.restHealPct * (1 + (factionRunModifiers(player).restHealBonus || 0)));
             break;
         }
     }
@@ -645,7 +671,9 @@ export function settleLife(player) {
 // 陨落/战败惩罚：损失当前碎银的比例（逆命者等 loseExtra 放大）。返回损失额。
 export function applyDeathPenalty(player) {
     const mods = getModifiers(player);
-    const rate = BALANCE.reward.loseCoinRate * (1 + mods.loseExtra);
+    const fr = factionRunModifiers(player); // 无名村镇·乡邻相助：陨落损失减免
+    let rate = BALANCE.reward.loseCoinRate * (1 + mods.loseExtra) * (1 - (fr.deathPenaltyReduce || 0));
+    rate = Math.max(0, rate);
     const lost = Math.floor((player.coin || 0) * rate);
     player.coin = Math.max(0, (player.coin || 0) - lost);
     return lost;
@@ -659,10 +687,81 @@ export function clampHp(hp, maxHp) {
     return Math.max(0, Math.min(maxHp || hp, Math.floor(hp)));
 }
 function labelStat(k) { return ({ hp: '气血', atk: '攻击', def: '防御', crit: '暴击', dodge: '闪避' })[k] || k; }
+// 派系短名（事件链 reputation 效果日志用；避免 import config/orders 造成噪音）。
+const FACTION_SHORT = { qingcheng: '青城', yaowang: '药王谷', zhujian: '铸剑山庄', blackmarket: '黑市', commoners: '村镇' };
 function pctSuffix(k) { return (k === 'crit' || k === 'dodge') ? '%' : ''; }
 function matLabel(k) {
     // 物料中文名（避免 import MATERIALS 造成噪音，这里只做兜底，UI 层有完整名）
     return k;
+}
+
+// ============================================================
+// 第五阶段·D 本世誓约（Run Contract）：抽选 / 立誓 / 进度推进+核验 / 发奖 / 状态文案。纯逻辑。
+// ============================================================
+// 开世 3 选 1 誓约（按本世现状粗筛，rare 不额外门槛，全部可立）。
+export function rollContractChoices(player, n = 3) {
+    return sampleN(RUN_CONTRACTS, n).map(c => c.id);
+}
+// 立誓（重置 progress；非法 id 视为不立）。
+export function setContract(player, contractId) {
+    if (!player.run) return;
+    if (!contractId || !getRunContract(contractId)) { player.run.contract = { id: null, progress: {}, failed: false, completed: false, claimed: false }; return; }
+    player.run.contract = { id: contractId, progress: {}, failed: false, completed: false, claimed: false };
+}
+function contractGoalMet(tmpl, progress) {
+    const subs = tmpl.goal.all ? tmpl.goal.all : [tmpl.goal];
+    return subs.every(g => (progress[g.kind] || 0) >= g.count);
+}
+// 推进一类行为；返回 { state:'completed'|'failed'|'progress'|null, tmpl, logs }（completed 时已发奖、置 claimed）。
+export function noteContract(player, kind, amount = 1) {
+    const c = player.run && player.run.contract;
+    if (!c || !c.id || c.completed || c.failed) return null;
+    const tmpl = getRunContract(c.id);
+    if (!tmpl) return null;
+    if (!c.progress || typeof c.progress !== 'object') c.progress = {};
+    // 违誓失败（如清修不染遇黑市交易）
+    if (tmpl.failOn === kind) { c.failed = true; return { state: 'failed', tmpl, logs: [] }; }
+    // 时限失败（十步一杀：节点推进越限且未达成）
+    if (tmpl.withinNodes && kind === 'nodeAdvance' && (player.run.nodesDone || 0) > tmpl.withinNodes && !contractGoalMet(tmpl, c.progress)) {
+        c.failed = true; return { state: 'failed', tmpl, logs: [] };
+    }
+    // 累计进度（nodeAdvance 仅用于时限核验，不计入目标）
+    if (kind !== 'nodeAdvance') c.progress[kind] = (c.progress[kind] || 0) + amount;
+    if (contractGoalMet(tmpl, c.progress)) {
+        c.completed = true; c.claimed = true;
+        const logs = grantContractReward(player, tmpl);
+        return { state: 'completed', tmpl, logs };
+    }
+    return { state: 'progress', tmpl, logs: [] };
+}
+// 发放誓约奖励（一次性；reputation 内联增减避免 import orders 成环）。返回中文日志。
+export function grantContractReward(player, tmpl) {
+    const reward = tmpl.reward || {};
+    const logs = [];
+    if (reward.coin) { player.coin = (player.coin || 0) + reward.coin; player.totalCoinEarned = (player.totalCoinEarned || 0) + reward.coin; logs.push(`碎银+${reward.coin}`); }
+    if (reward.exp) { player.exp = (player.exp || 0) + reward.exp; logs.push(`修为+${reward.exp}`); }
+    if (reward.honghuangPower) { player.honghuangPower = (player.honghuangPower || 0) + reward.honghuangPower; logs.push(`洪荒+${reward.honghuangPower}`); }
+    if (reward.karma && player.run) { player.run.karma = (player.run.karma || 0) + reward.karma; logs.push(`因果${reward.karma > 0 ? '+' : ''}${reward.karma}`); }
+    if (reward.reputation) {
+        if (!player.reputation || typeof player.reputation !== 'object') player.reputation = {};
+        const cap = BALANCE.orders.repMax;
+        for (const [f, amt] of Object.entries(reward.reputation)) { player.reputation[f] = Math.max(0, Math.min(cap, (player.reputation[f] || 0) + amt)); logs.push(`${FACTION_SHORT[f] || f}声望+${amt}`); }
+    }
+    if (reward.materials) { if (!player.materials || typeof player.materials !== 'object') player.materials = {}; for (const [k, q] of Object.entries(reward.materials)) { player.materials[k] = (player.materials[k] || 0) + q; logs.push(`${matLabel(k)}×${q}`); } }
+    if (reward.permStats) { if (!player.pillBonus || typeof player.pillBonus !== 'object') player.pillBonus = { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }; for (const [k, v] of Object.entries(reward.permStats)) { player.pillBonus[k] = (player.pillBonus[k] || 0) + v; logs.push(`永久${labelStat(k)}+${v}`); } }
+    return logs;
+}
+// 誓约状态（UI 展示）：返回 null（未立誓）或 { tmpl, done, failed, progressText }。
+export function contractStatus(player) {
+    const c = player.run && player.run.contract;
+    if (!c || !c.id) return null;
+    const tmpl = getRunContract(c.id);
+    if (!tmpl) return null;
+    const subs = tmpl.goal.all ? tmpl.goal.all : [tmpl.goal];
+    const kindLabel = { bossKill: '斩 Boss', poisonBurstKill: '毒蚀击杀', bossBreak: '破招', overchargeKill: '过载击破', afterimage: '影步补刀', blackmarketTrade: '黑市交易', townDeed: '行善委托' };
+    const progressText = subs.map(g => `${kindLabel[g.kind] || g.kind} ${Math.min(c.progress[g.kind] || 0, g.count)}/${g.count}`).join(' · ')
+        + (tmpl.withinNodes ? `（限 ${tmpl.withinNodes} 节点内，已 ${player.run.nodesDone || 0}）` : '');
+    return { tmpl, done: !!c.completed, failed: !!c.failed, progressText };
 }
 
 // 是否处于「一世进行中」（已选命格、有节点图、未待结算）。

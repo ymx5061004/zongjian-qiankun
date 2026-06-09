@@ -10,6 +10,10 @@ import {
 import { getModifiers } from './run.js';
 // 第四阶段·秘籍装配：心法/禁忌图鉴（纯数据叶子，无环）。
 import { HEART_ART_MAP, FORBIDDEN_ART_MAP } from './config/manuals.js';
+// 第五阶段·构筑机制 / Boss 招式 / 派系特权（数据叶子 + 纯逻辑模块，单向依赖，无环）。
+import { BUILD_RULES, BUILD_ARCHETYPES, BUILD_TAGS, DODGE_ENABLE_DODGE } from './config/builds.js';
+import { getBossMoveSet } from './config/bossMoves.js';
+import { factionBuildModifiers } from './factions.js';
 const LEGENDARY_QUALITY = 5;
 
 // —— 境界名 ——
@@ -652,17 +656,47 @@ function classifyChallengeCause(st, enemy, env, diag) {
 }
 
 // 候选改动（每条 apply 深拷贝后的 player，返回 true=改动成功）。覆盖 强化/心法/禁忌/丹药/破境 多源。
+//   kind：天机三策归类 safe(稳)/risky(险)/detour(绕)；cost：代价文案（三策每策都要有代价）。
 function buildTianjiCandidates() {
     const B = BALANCE;
     return [
-        { text: '强化兵刃 +2（提输出）', page: 'enhance', apply: p => { const it = p.equips && (p.equips.weapon || p.equips.subweapon); if (!it) return false; it.enhance = Math.min(B.enhance.maxLevel, (it.enhance || 0) + 2); return true; } },
-        { text: '强化防具 +2（提生存）', page: 'enhance', apply: p => { for (const s of ['armor', 'helm', 'ring', 'artifact', 'amulet', 'boots', 'gloves']) { const it = p.equips && p.equips[s]; if (it) { it.enhance = Math.min(B.enhance.maxLevel, (it.enhance || 0) + 2); return true; } } return false; } },
-        { text: '装配心法《玄龟息壤功》（防御/减伤）', page: 'kungfu', apply: p => { if ((p.realmLevel || 1) < 8) return false; p.loadout = p.loadout || {}; if (p.loadout.heart === 'heart_guard') return false; p.loadout.heart = 'heart_guard'; return true; } },
-        { text: '装配心法《奔雷剑心》（攻击/暴伤）', page: 'kungfu', apply: p => { if ((p.realmLevel || 1) < 8) return false; p.loadout = p.loadout || {}; if (p.loadout.heart === 'heart_sword') return false; p.loadout.heart = 'heart_sword'; return true; } },
-        { text: '参修禁忌《血河禁卷》（暴伤暴涨·气血大损，赌）', page: 'kungfu', apply: p => { p.loadout = p.loadout || {}; if (p.loadout.forbidden === 'forbid_blood') return false; p.loadout.forbidden = 'forbid_blood'; return true; } },
-        { text: '服「聚元丹」补气血（炼丹或药王谷委托）', page: 'alchemy', apply: p => { p.pillBonus = p.pillBonus || {}; p.pillBonus.hp = (p.pillBonus.hp || 0) + 300; return true; } },
-        { text: '服「淬体丹」增攻击', page: 'alchemy', apply: p => { p.pillBonus = p.pillBonus || {}; p.pillBonus.atk = (p.pillBonus.atk || 0) + 80; return true; } },
-        { text: '破境提升境界（全属性质变）', page: 'role', apply: p => { p.realmLevel = (p.realmLevel || 1) + 1; p.baseHp += B.breakthrough.hpGain; p.baseAtk += B.breakthrough.atkGain; p.baseDef += B.breakthrough.defGain; return true; } }
+        { text: '强化兵刃 +2（提输出）', page: 'enhance', kind: 'safe', cost: '耗锭+碎银', apply: p => { const it = p.equips && (p.equips.weapon || p.equips.subweapon); if (!it) return false; it.enhance = Math.min(B.enhance.maxLevel, (it.enhance || 0) + 2); return true; } },
+        { text: '强化防具 +2（提生存）', page: 'enhance', kind: 'safe', cost: '耗锭+碎银', apply: p => { for (const s of ['armor', 'helm', 'ring', 'artifact', 'amulet', 'boots', 'gloves']) { const it = p.equips && p.equips[s]; if (it) { it.enhance = Math.min(B.enhance.maxLevel, (it.enhance || 0) + 2); return true; } } return false; } },
+        { text: '装配心法《玄龟息壤功》（防御/减伤）', page: 'kungfu', kind: 'safe', cost: '占心法槽·攻-8%', apply: p => { if ((p.realmLevel || 1) < 8) return false; p.loadout = p.loadout || {}; if (p.loadout.heart === 'heart_guard') return false; p.loadout.heart = 'heart_guard'; return true; } },
+        { text: '装配心法《奔雷剑心》（攻击/暴伤）', page: 'kungfu', kind: 'risky', cost: '占心法槽·防-6%', apply: p => { if ((p.realmLevel || 1) < 8) return false; p.loadout = p.loadout || {}; if (p.loadout.heart === 'heart_sword') return false; p.loadout.heart = 'heart_sword'; return true; } },
+        { text: '参修禁忌《血河禁卷》（暴伤暴涨·气血大损，赌）', page: 'kungfu', kind: 'risky', cost: '气血-18%·占禁忌槽', apply: p => { p.loadout = p.loadout || {}; if (p.loadout.forbidden === 'forbid_blood') return false; p.loadout.forbidden = 'forbid_blood'; return true; } },
+        { text: '服「聚元丹」补气血（炼丹或药王谷委托）', page: 'alchemy', kind: 'safe', cost: '耗草药/委托', apply: p => { p.pillBonus = p.pillBonus || {}; p.pillBonus.hp = (p.pillBonus.hp || 0) + 300; return true; } },
+        { text: '服「淬体丹」增攻击', page: 'alchemy', kind: 'safe', cost: '耗草药/委托', apply: p => { p.pillBonus = p.pillBonus || {}; p.pillBonus.atk = (p.pillBonus.atk || 0) + 80; return true; } },
+        { text: '破境提升境界（全属性质变）', page: 'role', kind: 'safe', cost: '耗大量修为', apply: p => { p.realmLevel = (p.realmLevel || 1) + 1; p.baseHp += B.breakthrough.hpGain; p.baseAtk += B.breakthrough.atkGain; p.baseDef += B.breakthrough.defGain; return true; } }
+    ];
+}
+
+// 天机三策（第五阶段·F）：把候选改动按 稳/险/绕 归类，各取「模拟胜算增益最高」者，缺则给静态对症策。
+//   返回 [{ id, name, desc, estimatedGain(可空), cost, page }]，每策都标代价。
+function buildPlans(player, enemy, env, baseWin) {
+    const T = BALANCE.tianji;
+    const sims = [];
+    for (const c of buildTianjiCandidates()) {
+        let clone;
+        try { clone = JSON.parse(JSON.stringify(player)); } catch (e) { continue; }
+        let changed = false;
+        try { changed = c.apply(clone); } catch (e) { changed = false; }
+        if (!changed) continue;
+        ensureLoadout(clone);
+        const w = estimateWinRateVs(clone, enemy, env, T.samples);
+        if (w == null) continue;
+        sims.push(Object.assign({}, c, { gain: Math.round((w - baseWin) * 100) }));
+    }
+    const best = kind => sims.filter(s => s.kind === kind).sort((a, b) => b.gain - a.gain)[0] || null;
+    const mk = (id, name, cand, fb) => cand
+        ? { id, name, desc: cand.text, estimatedGain: cand.gain, cost: cand.cost || '—', page: cand.page }
+        : fb;
+    return [
+        mk('safe', '稳策', best('safe'),
+            { id: 'safe', name: '稳策', desc: '强化主战装备 + 炼根骨丹（聚元/玄龟），或破境——稳健提升、风险最低。', estimatedGain: null, cost: '锭+碎银/修为', page: 'enhance' }),
+        mk('risky', '险策', best('risky'),
+            { id: 'risky', name: '险策', desc: '参禁忌（血河/燃寿）博爆发，或精英/Boss 前「炉心过载」硬破——高收益、有反噬。', estimatedGain: null, cost: '气血/材料·有代价', page: 'kungfu' }),
+        { id: 'detour', name: '绕策', desc: '做药王谷/铸剑山庄委托换补给（换聚元丹补血、换锭强化），或回低关刷资源、生产备料——绕开硬刚。', estimatedGain: null, cost: '时间·生产产能', page: 'orders' }
     ];
 }
 
@@ -706,11 +740,100 @@ export function analyzeChallenge(player, mapId) {
     const diag = diagnoseCombat(player, enemy, env, T.samples);
     const cause = classifyChallengeCause(st, enemy, env, diag);
     const suggestions = suggestImprovements(player, enemy, env, st.winRate, cause);
+    const plans = buildPlans(player, enemy, env, st.winRate);   // 第五阶段·F 天机三策
     return {
         ok: true, targetName: name, mapId: id,
         winRate: st.winRate, avgRounds: st.avgRounds, danger: diag.danger,
-        cause: cause.key, causeText: cause.text, suggestions
+        cause: cause.key, causeText: cause.text, suggestions, plans
     };
+}
+
+// ============================================================
+// 第五阶段·Boss 招式速览（天机识别 Boss 威胁 + 玩家当前构筑能否破招）。纯只读，无招式牌返回 null。
+// 供轮回页 Boss 节点卡 / 战前面板展示「招式·威胁·可破招方式（高亮玩家能否破）」。
+// ============================================================
+export function describeBossMoves(player, regionId) {
+    const set = getBossMoveSet(regionId);
+    if (!set) return null;
+    let stats = {};
+    try { stats = computeStats(player).stats || {}; } catch (e) { stats = {}; }
+    const build = stats.build || {};
+    const karma = (player && player.run && player.run.karma) || 0;
+    const can = b => canBreakWithBuild(b, build, stats, karma);
+    return {
+        bossName: set.bossName,
+        moves: (set.moves || []).map(m => ({
+            id: m.id, name: m.name, telegraph: m.telegraph || '', trigger: m.trigger || {},
+            threat: bossMoveThreatText(m.effect, m.trigger),
+            breaks: (m.breakBy || []).map(b => ({ text: b.text, can: can(b) })),
+            breakable: (m.breakBy || []).some(can)
+        }))
+    };
+}
+// 玩家当前构筑能否满足某破招条件（机制类看 enabled，属性/因果/特权看实值）。
+function canBreakWithBuild(b, build, stats, karma) {
+    if (!b) return false;
+    switch (b.type) {
+        case 'swordForce':      return !!(build.sword && build.sword.enabled);
+        case 'poisonStacks':    return !!(build.poison && build.poison.enabled);
+        case 'guardStacks':     return !!(build.guard && build.guard.enabled);
+        case 'afterimage':      return !!(build.dodge && build.dodge.enabled);
+        case 'overcharge':      return !!(build.forge && build.forge.enabled);
+        case 'critRate':        return (stats.crit || 0) >= b.value;
+        case 'dodgeRate':       return (stats.dodge || 0) >= b.value;
+        case 'damageThisRound': return true; // 速杀向，凭爆发尝试
+        case 'karmaLow':        return (karma || 0) <= b.value;
+        case 'factionPerk':     return (build.factionPerks || []).includes(b.value);
+        default:                return false;
+    }
+}
+// ============================================================
+// 第五阶段·F 构筑摘要（analyzeBuild）：据当前 stats.build 给「主构筑/已启用机制/强项/弱点/可破 Boss 招/缺件」。
+// 纯只读，供「秘籍装配」页的构筑摘要面板。无构筑时给出「未成形 + 如何激活」的指引。
+// ============================================================
+export function analyzeBuild(player) {
+    let stats = {};
+    try { stats = computeStats(player).stats || {}; } catch (e) { stats = {}; }
+    const build = stats.build || {};
+    const keys = ['sword', 'poison', 'guard', 'dodge', 'forge'];
+    const enabled = keys.filter(k => build[k] && build[k].enabled);
+    const primary = (build.primary && build.primary !== 'none' && build.primary !== 'mixed') ? build.primary : (enabled[0] || 'none');
+    const arche = BUILD_ARCHETYPES[primary] || null;
+    const strengths = [], weaknesses = [], bossCounters = [];
+    enabled.forEach(k => { const a = BUILD_ARCHETYPES[k]; if (a) { strengths.push(...a.strengths); bossCounters.push(...a.counters); } });
+    if (arche) weaknesses.push(...arche.weaknesses);
+    // 缺件：机制启用但触发条件不足 / 完全无构筑。
+    const missing = [];
+    if (!enabled.length) missing.push('未启用任何构筑机制：选一门修行流派，或装配心法/禁忌，激活 剑势/毒蚀/守势/影步/炉心 之一');
+    if (build.sword && build.sword.enabled && (stats.crit || 0) < 15) missing.push('剑势靠暴击攒势：补暴击装/锐金丹/真卷秘籍');
+    if (build.dodge && build.dodge.enabled && (stats.dodge || 0) < 15) missing.push('影步靠闪避攒残影：补闪避装/轻灵丹');
+    if (build.poison && build.poison.enabled && !((stats.bleedPct || 0) > 0 || stats.poison)) missing.push('毒蚀缺持续毒源：配流血词条/蚀骨毒经/转毒修');
+    if (build.guard && build.guard.enabled && (stats.def || 0) < 1) missing.push('守势宜配厚血高防：强化防具/法宝');
+    if (build.forge && build.forge.enabled) missing.push('炉心需战前过载方显威：精英/Boss 前备好锭与碎银');
+    if (enabled.length >= 3) weaknesses.push('多线构筑：单项触发频率被摊薄，不如专精');
+    return {
+        primaryArchetype: primary,
+        primaryName: arche ? arche.name : '尚未成形',
+        primaryIcon: arche ? arche.icon : '○',
+        enabledMechanics: enabled.map(k => (BUILD_TAGS[k] ? `${BUILD_TAGS[k].icon}${BUILD_TAGS[k].name}` : k)),
+        strengths: [...new Set(strengths)],
+        weaknesses: [...new Set(weaknesses)],
+        bossCounters: [...new Set(bossCounters)],
+        missingPieces: missing
+    };
+}
+
+function bossMoveThreatText(ef, tr) {
+    ef = ef || {}; tr = tr || {};
+    const when = Number.isFinite(tr.every) ? `每 ${tr.every} 回合` : (Number.isFinite(tr.hpBelow) ? `残血<${tr.hpBelow}%` : '');
+    const parts = [];
+    if (ef.chargeMult) parts.push(`蓄力重击 ×${ef.chargeMult}`);
+    if (ef.atkBuff) parts.push(`狂怒 攻×${ef.atkBuff}`);
+    if (ef.heal) parts.push(`回血 ${Math.round(ef.heal * 100)}%`);
+    if (ef.lifesteal) parts.push(`命中吸血 ${Math.round(ef.lifesteal * 100)}%`);
+    if (ef.unavoidable) parts.push('无可闪避');
+    if (ef.poisonResist != null) parts.push('毒抗');
+    return (when ? when + '：' : '') + (parts.join('·') || '强力一击');
 }
 
 // —— 生产页「下一解锁」：当前等级 / 距下一级经验 / 下一个解锁动作 / 当前活动产出（按 prof）——
@@ -918,6 +1041,50 @@ export function loadoutArtModifiers(player) {
     return out;
 }
 
+// ============================================================
+// 第五阶段·构筑机制：据「流派 / 心法 / 禁忌 / 装备词条 / 派系特权」判定五机制是否启用，
+// 并把阈值/概率/倍率写进 stats.build，供 simulateBattle 的战斗状态引擎读取。
+//   ⚠️ 全部 enabled=false（无任何构筑条件）时 → 战斗引擎对其全程跳过 → 与第四阶段战斗一致（旧档/dev sim 零影响）。
+// 入参 stats 须为已算好的属性对象（读 bleedPct/poison/dodge 判定启用源）。fb=派系特权战斗修正。
+// ============================================================
+export function deriveBuild(player, stats, fb) {
+    const R = BUILD_RULES;
+    const lo = (player && player.loadout && typeof player.loadout === 'object') ? player.loadout : {};
+    const path = (player && player.cultivationPath) || null;
+    const perkIds = (fb && Array.isArray(fb.perkIds)) ? fb.perkIds : [];
+    const hasPerkPrefix = pre => perkIds.some(id => id.indexOf(pre) === 0);
+
+    const swordEnabled  = path === 'sword'   || lo.heart === 'heart_sword'   || hasPerkPrefix('qc_');
+    const poisonEnabled = path === 'poison'  || lo.heart === 'heart_poison'  || lo.forbidden === 'forbid_poison' || (stats.bleedPct || 0) > 0 || !!stats.poison || perkIds.includes('yw_antidote');
+    const guardEnabled  = path === 'body'    || lo.heart === 'heart_guard';
+    const dodgeEnabled  = path === 'agility' || lo.forbidden === 'forbid_void' || (stats.dodge || 0) >= DODGE_ENABLE_DODGE;
+    const forgeEnabled  = path === 'artisan' || hasPerkPrefix('zj_');
+
+    // 主构筑（UI/摘要展示用）：优先取与流派一致者，否则取首个启用者。
+    const enabledList = [['sword', swordEnabled], ['poison', poisonEnabled], ['guard', guardEnabled], ['dodge', dodgeEnabled], ['forge', forgeEnabled]].filter(e => e[1]).map(e => e[0]);
+    const pathToBuild = { sword: 'sword', poison: 'poison', body: 'guard', agility: 'dodge', artisan: 'forge' };
+    let primary = pathToBuild[path] && enabledList.includes(pathToBuild[path]) ? pathToBuild[path] : (enabledList[0] || 'none');
+    if (enabledList.length > 1 && primary === 'none') primary = 'mixed';
+
+    return {
+        sword: { enabled: swordEnabled, threshold: R.sword.threshold, forceOnCrit: R.sword.forceOnCrit, forceOnActive: R.sword.forceOnActive,
+                 breakDmgMult: R.sword.breakDmgMult, breakArmorPen: Math.min(0.95, R.sword.breakArmorPen + (fb ? fb.swordBreakArmor : 0)),
+                 executeLowPct: R.sword.executeLowPct, executeMult: R.sword.executeMult,
+                 forceChance: fb ? fb.swordForceChance : 0, refundOnBossBreak: fb ? fb.swordRefundOnBreak : 0 },
+        poison: { enabled: poisonEnabled, threshold: R.poison.threshold, maxStacks: R.poison.maxStacks, maxHpPct: R.poison.maxHpPct,
+                  bossEff: R.poison.bossEff, regenBonus: R.poison.regenBonus, lifesteal: fb ? fb.poisonLifesteal : 0 },
+        guard: { enabled: guardEnabled, threshold: R.guard.threshold,
+                 gainPerHit: R.guard.gainPerHit + (path === 'body' ? 1 : 0) + (lo.heart === 'heart_guard' ? 1 : 0),
+                 absorbPct: R.guard.absorbPct, counterPct: R.guard.counterPct, bigHitPct: R.guard.bigHitPct },
+        dodge: { enabled: dodgeEnabled, threshold: R.dodge.threshold, followAtkPct: R.dodge.followAtkPct, maxStacks: R.dodge.maxStacks },
+        forge: { enabled: forgeEnabled, dmgBonusPct: R.forge.dmgBonusPct + (fb ? fb.overchargePowerBonus : 0),
+                 dmgReductionPct: R.forge.dmgReductionPct + (fb ? fb.overchargeReductionBonus : 0),
+                 costIngot: R.forge.costIngot, costCoin: Math.max(0, Math.round(R.forge.costCoin * (1 + (fb ? fb.overchargeCostMult : 0)))), perLifeCap: R.forge.perLifeCap },
+        factionPerks: perkIds,
+        primary
+    };
+}
+
 // —— 由 player 派生当前战斗属性。纯函数：返回 {stats, honghuangPower} ——
 export function computeStats(player) {
     const rebornMult = 1 + player.rebornCount * BALANCE.rebornMultPerCount;
@@ -1039,6 +1206,14 @@ export function computeStats(player) {
     stats.regenPct += mods.regenAdd || 0;
     stats.thornsPct += mods.thornsAdd || 0;
     stats.lifestealPct += mods.lifestealAdd || 0;
+
+    // —— 第五阶段·派系特权（战斗向）+ 构筑机制派生 ——
+    const fb = factionBuildModifiers(player);
+    // 黑市「禁卷研习」：携带禁忌秘籍时增伤（risk 特权，folded 进增伤池；无特权/无禁忌为 0）。
+    const lo = (player.loadout && typeof player.loadout === 'object') ? player.loadout : {};
+    if (lo.forbidden && fb.forbiddenDmgBonus) stats.dmgBonus += fb.forbiddenDmgBonus;
+    // 构筑机制开关 + 参数（缺省全禁用 → 战斗引擎跳过 → 旧战斗原样）。
+    stats.build = deriveBuild(player, stats, fb);
 
     return { stats, honghuangPower };
 }
@@ -1206,7 +1381,7 @@ export function makeGearPiece(tier, slot, quality = 0) {
 }
 
 // ============================================================
-// 第五阶段·打造副词条 + 生产建议（纯逻辑）。
+// 打造副词条 + 生产建议（随打造系统上线·纯逻辑）。
 // ============================================================
 export function getCraftAffixById(id) { return CRAFT_AFFIXES.find(a => a.id === id) || null; }
 
@@ -1378,6 +1553,30 @@ export function simulateBattle(stats, enemy, skills, opts = {}) {
     let poisonStacks = 0, poisonDealt = 0;
     let dodges = 0, maxHit = 0, dmgTaken = 0; // 第四阶段成就统计：闪避数 / 单次最高伤害 / 累计受伤
 
+    // —— 第五阶段·构筑状态引擎（缺省全禁用 → 全程跳过 → 与第四阶段战斗完全一致）——
+    const build = stats.build || {};
+    const swB = (build.sword && build.sword.enabled) ? build.sword : null;     // 剑势
+    const poB = (build.poison && build.poison.enabled) ? build.poison : null;  // 毒蚀
+    const guB = (build.guard && build.guard.enabled) ? build.guard : null;     // 守势
+    const afB = (build.dodge && build.dodge.enabled) ? build.dodge : null;     // 影步
+    const ocB = (build.forge && build.forge.enabled && opts.overcharge) ? build.forge : null; // 炉心过载（仅战前抉择过载时生效）
+    let swordForce = 0, guardStacks = 0, afterimage = 0, buildPoison = 0;       // 战斗状态计数
+    const buildSummary = { swordBreaks: 0, poisonBursts: 0, guardCounters: 0, afterimageHits: 0, overcharges: 0, bossBreaks: 0 };
+    const perkIds = build.factionPerks || [];
+    const runKarma = opts.karma || 0;
+    const guardTactic = (tactic && Number.isFinite(tactic.takenPct) && tactic.takenPct < 0) ? 1 : 0; // 守心策略额外攒守势
+    // 炉心过载：开战即生效的一次性增伤/减伤
+    const ocDmgBonus = ocB ? (ocB.dmgBonusPct || 0) : 0;
+    const ocDmgRed = ocB ? (ocB.dmgReductionPct || 0) : 0;
+    if (ocB) { buildSummary.overcharges = 1; events.push({ side: 'overcharge', round: 1, text: '炉心过载，兵刃赤明，本战攻防大涨' }); }
+    // Boss 招式牌（仅区域 Boss 有 enemy.moves；其余敌人无 → useMoves=false，沿用旧 Boss 蓄力逻辑）。
+    const bossMoves = Array.isArray(enemy.moves) ? enemy.moves : [];
+    const useMoves = bossMoves.length > 0;
+    const moveFired = bossMoves.map(() => false);  // hpBelow 阶段招只触发一次
+    // 毒抗 Boss：招式带 poisonResist 则「毒蚀爆发」恒按该系数降效（万毒老祖天生毒抗，专克毒蚀流）。
+    let bossPoisonResist = 1;
+    bossMoves.forEach(mv => { if (mv.effect && Number.isFinite(mv.effect.poisonResist)) bossPoisonResist = Math.min(bossPoisonResist, mv.effect.poisonResist); });
+
     // —— 地图词缀「战斗环境」（来自 resolveMapEnv；荒原/秘境为 null → 全程零影响）。各项已在 resolveMapEnv 封顶。——
     const envEnemyCrit = env ? (env.enemyCritChance || 0) : 0;          // 剑冢：敌方暴击率
     const envEnemyCritMult = env ? (env.enemyCritMult || 1.5) : 1.5;
@@ -1400,7 +1599,7 @@ export function simulateBattle(stats, enemy, skills, opts = {}) {
         if (tactic && tactic.chargeAt === round) events.push({ side: 'tactic', round, text: '⚡ 养剑·爆发！' });
 
         // ① 增伤池
-        let bonusPct = dmgBonus + vsBonusPct;                                               // 词条增伤 + 对精英/Boss 针对增伤
+        let bonusPct = dmgBonus + vsBonusPct + ocDmgBonus;                                  // 词条增伤 + 对精英/Boss 针对增伤 + 炉心过载增伤
         if (round <= C.openerRounds) bonusPct += openerBonus;                              // 先发制人
         if (rampPerRound) bonusPct += rampPerRound * Math.min(round - 1, C.rampMaxStacks); // 越战越勇
         if ((eHp / enemy.maxHp) * 100 < C.executeThresh) bonusPct += executeBonus;          // 斩杀
@@ -1444,6 +1643,32 @@ export function simulateBattle(stats, enemy, skills, opts = {}) {
         if (heal > 0) { const before = pHp; pHp = Math.min(maxPHp, pHp + heal); heal = pHp - before; }
 
         events.push({ side: 'player', round, dmg: dmgToE, isCrit, heal, bleed: bleedDmg, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
+
+        // —— 剑势：暴击/主动命中攒势，满阈值触发「破绽斩」(额外伤害·部分无视防御·残血追加斩杀) ——
+        if (swB && eHp > 0) {
+            if (isCrit) { swordForce += swB.forceOnCrit; if (swB.forceChance > 0 && Math.random() < swB.forceChance) swordForce += 1; }
+            if (active) swordForce += swB.forceOnActive;
+            if (swordForce >= swB.threshold) {
+                swordForce -= swB.threshold;
+                const pen = Math.min(0.95, swB.breakArmorPen || 0);
+                let breakDmg = Math.floor(stats.atk * swB.breakDmgMult - enemy.def * (1 - pen));
+                if ((eHp / eMaxHp) * 100 < swB.executeLowPct) breakDmg += Math.floor(stats.atk * swB.executeMult); // 残血追加斩杀
+                breakDmg = Math.max(1, breakDmg);
+                eHp -= breakDmg; buildSummary.swordBreaks++;
+                if (breakDmg > maxHit) maxHit = breakDmg;
+                events.push({ side: 'sword', round, dmg: breakDmg, eHpPct: Math.max(0, (eHp / eMaxHp) * 100) });
+            }
+        }
+        // —— 影步：上回合留下的残影 → 本回合追加一击较弱攻击（对必中/雷罚 Boss 招式当回合失效）——
+        if (afB && afterimage > 0 && eHp > 0) {
+            afterimage -= 1;
+            let f = Math.max(1, Math.floor(stats.atk * afB.followAtkPct - enemyEffDef));
+            if (eDmgRed > 0) f = Math.max(1, Math.floor(f * (1 - eDmgRed / 100)));
+            eHp -= f; buildSummary.afterimageHits++;
+            if (f > maxHit) maxHit = f;
+            events.push({ side: 'afterimage', round, dmg: f, eHpPct: Math.max(0, (eHp / eMaxHp) * 100) });
+        }
+
         // 毒修中毒（修行流派·毒修）：出手有概率叠一层，再按当前层数对敌造成真伤。
         if (poison && eHp > 0) {
             if (poisonStacks < poisonMaxStacks && Math.random() * 100 < poisonChance) poisonStacks++;
@@ -1462,6 +1687,20 @@ export function simulateBattle(stats, enemy, skills, opts = {}) {
                 events.push({ side: 'tactic', round, text: `淬毒(${tacticPoisonStacks}层) -${pd}`, poison: pd, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
             }
         }
+        // —— 毒蚀：流血/淬毒/毒修出手攒毒层，满阈值「毒蚀爆发」(敌最大气血百分比真伤·对再生敌增效·对毒抗Boss降效) ——
+        if (poB && eHp > 0) {
+            const sourceActive = bleedDmg > 0 || !!poison || (tactic && tactic.poisonPctPerStack); // 有毒/流血源才攒
+            if (sourceActive) buildPoison = Math.min(poB.maxStacks, buildPoison + 1);
+            if (buildPoison >= poB.threshold) {
+                buildPoison -= poB.threshold;
+                let eff = (enemy.isBoss ? poB.bossEff : 1) * bossPoisonResist;        // Boss/毒抗 降效
+                if ((enemy.regenPct || 0) > 0) eff *= (1 + poB.regenBonus);            // 对再生敌增效
+                const burst = Math.max(1, Math.floor(eMaxHp * poB.maxHpPct * eff));
+                eHp -= burst; poisonDealt += burst; buildSummary.poisonBursts++;
+                if (poB.lifesteal > 0) { const h = Math.floor(burst * poB.lifesteal); if (h > 0) pHp = Math.min(maxPHp, pHp + h); } // 药王谷·毒蚀回血
+                events.push({ side: 'poisonburst', round, dmg: burst, stacks: poB.threshold, eHpPct: Math.max(0, (eHp / enemy.maxHp) * 100) });
+            }
+        }
         // 敌·荆棘：受击反弹你本次伤害的真伤（可能反杀你）
         if (eThorns > 0) {
             const t = Math.floor(dmgToE * eThorns / 100);
@@ -1470,13 +1709,43 @@ export function simulateBattle(stats, enemy, skills, opts = {}) {
         if (pHp <= 0) break;
         if (eHp <= 0) break;
 
-        // ④ 敌方出手：定身 → 格挡 → 闪避 → 命中
+        // —— 第五阶段·Boss 招式牌：发动 / 破招（仅区域 Boss 有 moves；其余敌人 useMoves=false 跳过）——
+        // 在敌方出手前结算：破招成功 → 该招有害效果被打断(减伤/打断/降 buff)；否则发动重击/回血/狂怒/必中/吸血。
+        let moveCharge = 1, moveUnavoidable = false, moveLifesteal = 0;
+        if (useMoves) {
+            for (let mi = 0; mi < bossMoves.length; mi++) {
+                const mv = bossMoves[mi], tr = mv.trigger || {};
+                let fires = false;
+                if (Number.isFinite(tr.every) && tr.every > 0 && round % tr.every === 0) fires = true;
+                else if (Number.isFinite(tr.hpBelow) && !moveFired[mi] && (eHp / eMaxHp) * 100 < tr.hpBelow) fires = true;
+                if (!fires) continue;
+                moveFired[mi] = true;
+                const ctx = { swordForce, guardStacks, buildPoison, afterimage, crit: stats.crit, dodge: effDodge, dmgThisRound: dmgToE, eMaxHp, karma: runKarma, overcharge: !!ocB, perkIds };
+                const brk = (mv.breakBy || []).find(b => meetsBreakCondition(b, ctx));
+                if (brk) {
+                    buildSummary.bossBreaks++;
+                    if (swB && enemy.isBoss && swB.refundOnBossBreak) swordForce += swB.refundOnBossBreak; // 青城·归鞘再发
+                    events.push({ side: 'bossmove', round, name: mv.name, broken: true, by: brk.text });
+                    continue; // 破招成功 → 跳过该招效果
+                }
+                const ef = mv.effect || {};
+                events.push({ side: 'bossmove', round, name: mv.name, broken: false, telegraph: mv.telegraph || '' });
+                if (Number.isFinite(ef.chargeMult)) moveCharge *= ef.chargeMult;
+                if (Number.isFinite(ef.atkBuff)) enemyAtk = Math.floor(enemyAtk * ef.atkBuff);
+                if (Number.isFinite(ef.heal) && eHp > 0) { const h = Math.floor(eMaxHp * ef.heal); eHp = Math.min(eMaxHp, eHp + h); events.push({ side: 'eregen', round, heal: h, eHpPct: Math.max(0, (eHp / eMaxHp) * 100) }); }
+                if (Number.isFinite(ef.lifesteal)) moveLifesteal = Math.max(moveLifesteal, ef.lifesteal);
+                if (ef.unavoidable) moveUnavoidable = true;
+            }
+        }
+
+        // ④ 敌方出手：定身 → 格挡 → 闪避(影步) → 命中
         if (stunChance > 0 && Math.random() * 100 < stunChance) {
             events.push({ side: 'evade', round, text: '定身' });
         } else if (blockPct > 0 && Math.random() * 100 < blockPct) {
             events.push({ side: 'evade', round, text: '格挡' });
-        } else if (Math.random() * 100 < effDodge) {
-            dodges++;                                                      // 成就：闪避计数
+        } else if (!moveUnavoidable && Math.random() * 100 < effDodge) {     // 必中/雷罚招式(moveUnavoidable)无视闪避
+            dodges++;                                                        // 成就：闪避计数
+            if (afB) afterimage = Math.min(afB.maxStacks, afterimage + 1);   // 影步：闪避成功攒残影
             events.push({ side: 'evade', round, text: '闪避' });
         } else {
             // 区域之主·残血狂暴（一次性提攻）
@@ -1484,22 +1753,39 @@ export function simulateBattle(stats, enemy, skills, opts = {}) {
                 enraged = true; enemyAtk = Math.floor(enemyAtk * enrageMult);
                 events.push({ side: 'tactic', round, text: '⚠ 区域之主·狂暴！' });
             }
-            // 区域之主·周期蓄力大招
-            const charged = chargeEvery > 0 && round % chargeEvery === 0;
-            const curAtk = charged ? Math.floor(enemyAtk * chargeMult) : enemyAtk;
+            // 蓄力大招：有招式牌时由 moveCharge 接管(避免双重大招)；否则沿用通用周期蓄力。
+            const charged = useMoves ? (moveCharge > 1) : (chargeEvery > 0 && round % chargeEvery === 0);
+            const curAtk = useMoves ? Math.floor(enemyAtk * moveCharge) : (charged ? Math.floor(enemyAtk * chargeMult) : enemyAtk);
             let dmgToP = Math.max(1, curAtk - stats.def);
-            const red = Math.min(C.dmgReductionCap, dmgReduction + (lowHp ? lastStandBonus : 0)); // 减伤(背水加成，统一封顶)
+            const red = Math.min(C.dmgReductionCap, dmgReduction + (lowHp ? lastStandBonus : 0) + ocDmgRed); // 减伤(背水 + 炉心过载，统一封顶)
             if (red > 0) dmgToP = Math.max(1, Math.floor(dmgToP * (1 - red / 100)));
             let eCrit = false;
             if (envEnemyCrit > 0 && Math.random() * 100 < envEnemyCrit) { dmgToP = Math.floor(dmgToP * envEnemyCritMult); eCrit = true; } // 剑冢：守卫暴击
             if (tactic && tactic.takenPct) dmgToP = Math.max(1, Math.floor(dmgToP * (1 + tactic.takenPct / 100)));
+            // —— 守势：受击攒势，满阈值后「仅在大伤害(蓄力招/单击≥bigHitPct×最大气血)来临时」抵消并反震 ——
+            //   只接大招＝守势是抗爆发工具，普通小伤害不消耗守势、不在常规战无脑堆生存（体修不被拉满）。
+            let guardAbsorbed = 0, guardCounter = 0;
+            if (guB) {
+                guardStacks += guB.gainPerHit + guardTactic;
+                const bigHit = charged || dmgToP >= maxPHp * (guB.bigHitPct || 0.15);
+                if (guardStacks >= guB.threshold && bigHit) {
+                    guardStacks -= guB.threshold;
+                    guardAbsorbed = Math.floor(dmgToP * guB.absorbPct);
+                    dmgToP = Math.max(1, dmgToP - guardAbsorbed);
+                    guardCounter = Math.floor(stats.atk * guB.counterPct);
+                    if (guardCounter > 0 && eHp > 0) eHp -= guardCounter;
+                    buildSummary.guardCounters++;
+                    events.push({ side: 'guard', round, absorbed: guardAbsorbed, counter: guardCounter, eHpPct: Math.max(0, (eHp / eMaxHp) * 100) });
+                }
+            }
             pHp -= dmgToP;
             dmgTaken += dmgToP;                                            // 成就：累计受伤
             if (thornsDmg > 0) eHp -= thornsDmg;                           // 我方反伤(真伤)
-            let eHeal = 0;                                                  // 敌·嗜血：命中你时回血
-            if (eLifesteal > 0 && eHp > 0) { eHeal = Math.floor(dmgToP * eLifesteal / 100); if (eHeal > 0) eHp = Math.min(eMaxHp, eHp + eHeal); }
+            let eHeal = 0;                                                  // 敌·嗜血 + Boss 招式吸血：命中你时回血
+            const totalLeech = eLifesteal + (moveLifesteal * 100);
+            if (totalLeech > 0 && eHp > 0) { eHeal = Math.floor(dmgToP * totalLeech / 100); if (eHeal > 0) eHp = Math.min(eMaxHp, eHp + eHeal); }
             events.push({ side: 'enemy', round, dmg: dmgToP, reflect: thornsDmg, eHeal, charged, crit: eCrit, pHpPct: Math.max(0, (pHp / maxPHp) * 100) });
-            if (eHp <= 0) break;                                            // 反伤也可能反杀
+            if (eHp <= 0) break;                                            // 反伤/反震也可能反杀
         }
         if (pHp <= 0) break;
 
@@ -1528,7 +1814,26 @@ export function simulateBattle(stats, enemy, skills, opts = {}) {
     // enemyDead：敌人是否真被打死(用于 Boss——撑满回合"存活"不算击杀)。win 沿用旧义(玩家存活)，地图挂机不变。
     // remainingHp：玩家剩余气血（百世轮回节点战斗的持久血量池据此更新；负数夹到 0）。
     // poisonDealt/dodges/maxHit/dmgTaken/finalPHpPct：策略向成就统计。
-    return { win: pHp > 0, enemyDead: eHp <= 0, events, remainingHp: Math.max(0, pHp), poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct: Math.max(0, (pHp / maxPHp) * 100) };
+    return { win: pHp > 0, enemyDead: eHp <= 0, events, remainingHp: Math.max(0, pHp), poisonDealt, dodges, maxHit, dmgTaken, finalPHpPct: Math.max(0, (pHp / maxPHp) * 100), buildSummary };
+}
+
+// 破招条件判定（纯）：ctx 提供战斗状态计数 + 静态属性 + 因果/过载/特权。value 语义见 config/bossMoves.js。
+//   damageThisRound 的 value ≤1 时视为「敌最大气血比例」(速杀)，否则为绝对伤害。
+function meetsBreakCondition(b, ctx) {
+    if (!b) return false;
+    switch (b.type) {
+        case 'swordForce':     return (ctx.swordForce || 0) >= b.value;
+        case 'guardStacks':    return (ctx.guardStacks || 0) >= b.value;
+        case 'poisonStacks':   return (ctx.buildPoison || 0) >= b.value;
+        case 'afterimage':     return (ctx.afterimage || 0) >= b.value;
+        case 'overcharge':     return !!ctx.overcharge;
+        case 'critRate':       return (ctx.crit || 0) >= b.value;
+        case 'dodgeRate':      return (ctx.dodge || 0) >= b.value;
+        case 'damageThisRound': { const need = b.value <= 1 ? (ctx.eMaxHp || 0) * b.value : b.value; return (ctx.dmgThisRound || 0) >= need; }
+        case 'karmaLow':       return (ctx.karma || 0) <= b.value;
+        case 'factionPerk':    return (ctx.perkIds || []).includes(b.value);
+        default:               return false;
+    }
 }
 
 // 触发主动技时择招：取「有效倍率最高」的一门（power + level*scale）。

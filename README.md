@@ -20,7 +20,11 @@ zongjian-qiankun/
 │   │   ├── runtalents.js 12 个本世奇珍/感悟(剑/毒/守/通用 三系，仅当世) ★二期
 │   │   ├── enemyaffixes.js 敌人词条(狂暴/再生/荆棘/护体/嗜血/天罚) ★二期
 │   │   ├── manuals.js   心法/禁忌 图鉴(秘籍装配) ★四期
-│   │   └── orders.js    江湖委托模板 + 5 派系 ★四期
+│   │   ├── orders.js    江湖委托模板 + 5 派系 ★四期
+│   │   ├── builds.js    构筑机制(剑势/毒蚀/守势/影步/炉心)阈值·概率·倍率 ★五期
+│   │   ├── bossMoves.js Boss 招式牌 + 破招条件(按区域) ★五期
+│   │   ├── factions.js  派系声望特权(5 派×3 档) ★五期
+│   │   └── contracts.js 本世誓约(8 种 Run Contracts) ★五期
 │   ├── util.js         通用纯工具(formatNumber 等)
 │   ├── state.js        【状态层】唯一数据源 state(player/finalStats/...)；player.run/legacies 为轮回态
 │   ├── storage.js      存档：localStorage 读写 + 版本号 + 迁移 + 容错（v5：补全 run/legacies）
@@ -29,6 +33,7 @@ zongjian-qiankun/
 │   ├── run.js          【逻辑层·百世轮回】纯引擎：命格遗产修正聚合 / 节点图生成 / 敌人 /
 │   │                     奇遇结算 / 节点奖励计划 / 生死结算。仅依赖 config，被 domain 反向依赖(无循环)
 │   ├── orders.js        【逻辑层·四期】江湖委托纯逻辑：生成/校验/结算/刷新/声望(依赖 config + domain 工具，无环)
+│   ├── factions.js      【逻辑层·五期】派系声望特权纯逻辑：据 reputation 解锁特权 + 聚合战斗/玩法修正(仅依赖 config/factions，无环)
 │   ├── ui/
 │   │   ├── dialog.js    toast / 异步 confirm / 多选 choose / chooseCard(卡片三选一)
 │   │   ├── render.js    【视图层】面板渲染 + tooltip + 切页
@@ -85,6 +90,29 @@ zongjian-qiankun/
 - **天机推演（卡关诊断增强）**：在「百关征途」页给出当前关卡**胜算 % / 平均回合 / 失败主因**（输出不足 / 生存不足 / 被反伤克制 / 被再生拖死 / 守卫暴击 / Boss 蓄力…），并**深拷贝玩家、临时施加某改动后重模拟、对比真实胜率**给出可执行建议（「强化兵刃 +X%」「装配防守心法 +Y%」「服聚元丹」「破境」「先做药王谷委托」…）——非假建议。纯函数 `domain.analyzeChallenge`，on-demand 计算（进页或点【重新推演】时算）不拖慢渲染。
 
 > 平衡旋钮集中在 `config.js → BALANCE.loadout / BALANCE.orders / BALANCE.tianji`；心法/禁忌数值在 `config/manuals.js`、委托数值在 `config/orders.js`。`dev/balance-sim` 实测 1~100 关与各流派胜率**基线零漂移**（sim 玩家走真实装配，初始拳法入槽）。
+
+### 第五阶段（已实现）
+
+把「带取舍的构筑」**机制化**——主要流派拥有不同**战斗规则**，并给 Boss 可读招式、给派系声望可解锁特权。三大系统全部**数据驱动**、与战斗**同源**（统一走 `computeStats → stats.build → simulateBattle`）、旧档**自动迁移**（`SAVE_VERSION` 升至 **9**）。**没有任何构筑条件时，战斗逻辑与第四阶段完全一致**（旧档/dev sim 零影响）。
+
+- **构筑机制化 / 战斗状态引擎**：`computeStats` 据 流派 / 心法 / 禁忌 / 装备词条 / 派系特权 判定五机制是否启用，写进 `stats.build`，由 `simulateBattle` 的轻量「战斗状态引擎」结算并返回 `buildSummary`（战斗日志/结算面板可见）：
+  - **剑势**（剑修 / 奔雷剑心 / 青城派）：暴击·主动命中攒势，满阈值触发**破绽斩**（额外伤害·部分无视防御·残血追加斩杀）。
+  - **毒蚀**（毒修 / 青莲蚀心 / 蚀骨毒经 / 流血词条 / 药王谷）：流血·淬毒·毒修出手攒毒层，满阈值**毒蚀爆发**（敌最大气血百分比真伤·对再生敌增效·对毒抗 Boss 降效）。
+  - **守势**（体修 / 玄龟息壤 / 守心策略）：受击攒势，满阈值**仅在大伤害(蓄力招/单击≥15%最大气血)来临时**抵消一部分并反震——是抗爆发/破招工具，常规小伤害不堆生存（体修不被无脑拉满）。
+  - **影步**（身法 / 无相残篇 / 高闪避）：闪避成功攒残影，下一击追加一段较弱攻击；对「必中/雷罚」类 Boss 招式失效（其弱点）。
+  - **炉心过载**（器修 / 铸剑山庄）：精英/Boss **战前抉择**，消耗 锭+碎银+本世次数（`run.overchargeUsed`，有上限），换本战增伤/减伤并可硬破部分 Boss 招式。
+- **Boss 招式牌与破招**：每区域之主≥2 招（周期蓄力招 + 残血阶段招），有蓄招预兆与可读威胁；**破招条件**（剑势/毒蚀/守势/影步/过载/暴击/闪避/单击爆发/低因果/派系特权）由构筑机制满足后**打断/削弱该招**。棋盘 Boss 节点卡展示招式·威胁·可破招方式（玩家当前构筑能破的高亮✓）。
+- **派系声望特权**：五大派系各 3 档，按 `player.reputation` 自动解锁（旧档已有声望直接生效）——青城(剑势/暴击/破招) / 药王谷(解毒/休整/毒蚀回血/降因果) / 铸剑山庄(过载降耗/增威/护体) / 黑市牙行(禁忌增伤/刷新降价/稀有门槛↓·**带因果风险**) / 无名散修(降陨落损失/奇遇收益/遗产保底)。纯函数 `getFactionPerks / hasFactionPerk / factionBuildModifiers / factionRunModifiers`（`src/factions.js`），战斗特权折进 `stats.build`、玩法特权由 `run`/`orders` 读取。委托页新增「派系特权」面板（当前声望/已解锁/下一档/黑市风险提示）。
+
+> 平衡旋钮集中在 `config/builds.js`（机制阈值/概率/倍率）、`config/bossMoves.js`（招式/破招）、`config/factions.js`（特权档位/数值）。`dev/balance-sim` 实测：**「无流派」基线零漂移**（不启用任何机制），各流派获得**适度**强化（剑修/毒修略升、体修守势只在大招时触发故常规战≈原值、身法在常规快敌前仍偏弱＝其设计弱点、器修需主动过载方显威），无任一构筑「全能」。
+
+第五阶段同时落地了三项进阶玩法（数据驱动、复用既有引擎）：
+
+- **本世誓约（Run Contracts）**：每世开局 3 选 1（可不立）一道誓约，定下这世打法目标——8 种模板（清修不染/十步一杀/百毒行/铁壁苦修/黑契入命/炉火不熄/救厄济民/影渡雷劫）。进度由战斗 `buildSummary`、黑市交易、委托交付、节点推进**实时推进**，达成即一次性发奖（声望/碎银/材料/根骨…），违誓（如清修遇黑市、十步一杀超时）即破。数据 `config/contracts.js`、逻辑 `run.js`（`rollContractChoices/setContract/noteContract/grantContractReward/contractStatus`），轮回页有誓约进度条、结算回显结果。
+- **事件链增强**：新增 6 条 3 步短链（剑灵低语/药王救疫/黑市债契/炉心铸剑/凡人香火/雷劫问心），复用 `worldFlags + require` 串联，payoff 影响构筑机制/Boss 破招（剑势·守势·影步·低因果）与**派系声望**（事件 `effects` 新增 `reputation` 键）。
+- **天机三策 + 构筑摘要 + 装配预设**：`analyzeChallenge` 新增 `plans`（稳/险/绕三策，各带代价 + 模拟估算胜算）；新增纯函数 `analyzeBuild`（主构筑/已启用机制/强项/怕什么/可破 Boss 招/推荐补件），秘籍页有构筑摘要面板；`player.loadoutPresets`（最多 3 个）支持保存/应用/删除当前装配，应用时自动清理 dangling 秘籍 id。
+
+> v9 的 `player.loadoutPresets` 与 `player.run.contract`/`run.overchargeUsed` 字段即服务于上述玩法。
 
 ## 本地预览
 
@@ -144,7 +172,9 @@ npx serve .
 
 ## 存档说明
 
-存档键名 `wuxia_v6_full_save`（沿用旧版，老存档兼容）。当前 `SAVE_VERSION = 8`（v8 新增秘籍装配 `loadout` / 江湖委托 `orders` / 派系声望 `reputation`；v7 历世记录 / v6 地图词缀·黑市刷新 / v5 百世轮回 `run`/`legacies`）。结构变更时在 `src/storage.js` 的 `migrate()` / `normalizePlayer()` 内按 `saveVersion` 逐步升级 + 默认值兜底，旧档不会损坏（缺 `loadout`/`orders`/`reputation`/`run` 等新字段会自动补全；旧档加载时还会自动配招「最强主动 1 + 被动 3」，老玩家不会因装配系统骤弱）。导入/导出存档同样走 `normalizePlayer`，旧档导入不炸。
+存档键名 `wuxia_v6_full_save`（沿用旧版，老存档兼容）。当前 `SAVE_VERSION = 9`（**v9 新增构筑机制统计 `buildStats` / 炉心过载次数 `run.overchargeUsed` / 装配预设 `loadoutPresets` / 本世誓约 `run.contract`**；v8 秘籍装配 `loadout` / 江湖委托 `orders` / 派系声望 `reputation`；v7 历世记录 / v6 地图词缀·黑市刷新 / v5 百世轮回 `run`/`legacies`）。结构变更时在 `src/storage.js` 的 `migrate()` / `normalizePlayer()` 内按 `saveVersion` 逐步升级 + 默认值兜底，旧档不会损坏。**v8→v9 全为新增字段**：缺 `buildStats`/`loadoutPresets`/`run.contract`/`run.overchargeUsed` 自动补默认值；`loadoutPresets` 内已不存在的秘籍 id（dangling）会被清理；旧档已有的 `reputation` 声望可**直接触发**对应派系特权，无需额外迁移。导入/导出存档同样走 `normalizePlayer`，旧档导入不炸。
+
+> **第五阶段验证命令**：`node scripts/balance-sim.mjs`（全量）/ `enemy` / `power` / `reward` / `path 20` / `path 50`——核对「无流派」基线零漂移、各流派适度强化、无构筑「全能」。本地预览经 `python -m http.server 8080`（**勿 file://**），重点查：百世轮回（普通/事件/Boss 节点）、秘籍装配、江湖委托（派系特权面板）、战斗日志（剑势/毒蚀/守势/影步/过载/破招）、天机推演、生产页。
 
 ## 致谢与声明
 

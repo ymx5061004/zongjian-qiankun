@@ -17,8 +17,16 @@ export function makeDefaultRun() {
         nodesDone: 0, clearedBosses: 0, coinGained: 0, expGained: 0,
         selectedTactic: 'balanced', lifepathId: null, runTalents: [], worldFlags: {},
         // 本世临时属性加成（事件 stats 效果）；轮回时清空，不跨世保留
-        tempBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 }
+        tempBonus: { hp: 0, atk: 0, def: 0, crit: 0, dodge: 0 },
+        // —— 第五阶段 ——
+        overchargeUsed: 0,          // 本世炉心过载已用次数（受 BUILD_RULES.forge.perLifeCap 上限约束）
+        contract: makeDefaultContract()  // 本世誓约（预留字段；D 项落地，未实现时恒为默认值、不参与玩法）
     };
+}
+
+// 本世誓约（第五阶段·D 预留）：开世可立一誓，结算时核验。未实现 D 时保持默认（id=null → 无誓约、零影响）。
+export function makeDefaultContract() {
+    return { id: null, progress: {}, failed: false, completed: false, claimed: false };
 }
 
 export function makeDefaultPlayer() {
@@ -62,8 +70,17 @@ export function makeDefaultPlayer() {
         records: makeDefaultRecords(),
         // —— 第四阶段·江湖委托/宗门订单 + 派系声望（跨世永久累积）——
         orders: makeDefaultOrders(),
-        reputation: makeDefaultReputation()
+        reputation: makeDefaultReputation(),
+        // —— 第五阶段·构筑机制触发统计（跨世永久累积；战斗 buildSummary 累加）——
+        buildStats: makeDefaultBuildStats(),
+        // —— 第五阶段·装配预设（预留字段；F 项落地，最多 3 个；未实现时恒为空数组）——
+        loadoutPresets: []
     };
+}
+
+// 第五阶段·构筑机制触发计数（剑势破绽斩 / 毒蚀爆发 / 守势反震 / 影步补刀 / 炉心过载 / Boss 破招）。
+export function makeDefaultBuildStats() {
+    return { swordBreaks: 0, poisonBursts: 0, guardCounters: 0, afterimageHits: 0, overcharges: 0, bossBreaks: 0 };
 }
 
 // 秘籍装配（第四阶段）：携带进战斗的秘籍。active/passives 存「已拥有 skills 的 id」（active≤1、passives≤3）；
